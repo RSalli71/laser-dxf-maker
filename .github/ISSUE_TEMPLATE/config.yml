@@ -1,0 +1,13 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 📖 Documentation
+    url: https://github.com/<ORG>/<REPO>/blob/main/README.md
+    about: Read the setup + workflow rules first.
+
+  - name: 💬 Questions / Support
+    url: https://github.com/<ORG>/<REPO>/discussions
+    about: Please use Discussions for questions.
+
+  - name: 🔐 Security reports
+    url: https://github.com/<ORG>/<REPO>/security/policy
+    about: Please do not report vulnerabilities via public issues.

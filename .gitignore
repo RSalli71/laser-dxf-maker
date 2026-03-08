@@ -1,0 +1,69 @@
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+
+# Env / Secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# Logs
+*.log
+logs/
+
+# Node / Web
+node_modules/
+dist/
+build/
+.next/
+out/
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Java / Kotlin / Android
+*.class
+.gradle/
+build/
+*.iml
+
+# .NET
+bin/
+obj/
+
+# Rust
+target/
+
+# Go
+bin/
+*.exe
+*.out
+
+# C/C++
+*.o
+*.obj
+*.a
+*.so
+*.dll
+
+# Misc
+tmp/
+.cache/
+
+# Python caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+
+# JetBrains
+.idea/

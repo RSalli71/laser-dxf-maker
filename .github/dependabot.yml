@@ -1,0 +1,29 @@
+version: 2
+updates:
+  # GitHub Actions (immer sinnvoll)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+
+  # Node / npm (wird nur aktiv, wenn package.json vorhanden ist)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+
+  # Python / pip (wird nur aktiv, wenn requirements.txt vorhanden ist)
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+    open-pull-requests-limit: 5
+

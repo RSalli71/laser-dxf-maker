@@ -1,0 +1,167 @@
+name: CI
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      # ------------------------------------------------------------
+      # If ship-safe exists, we prefer it as the single source of truth.
+      # We still setup runtimes first for determinism + caching.
+      # ------------------------------------------------------------
+
+      - name: Detect Node package manager
+        id: nodepm
+        if: ${{ hashFiles('package.json') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f pnpm-lock.yaml ]]; then
+            echo "pm=pnpm" >> "$GITHUB_OUTPUT"
+            echo "cache=pnpm" >> "$GITHUB_OUTPUT"
+          elif [[ -f yarn.lock ]]; then
+            echo "pm=yarn" >> "$GITHUB_OUTPUT"
+            echo "cache=yarn" >> "$GITHUB_OUTPUT"
+          elif [[ -f package-lock.json ]]; then
+            echo "pm=npm" >> "$GITHUB_OUTPUT"
+            echo "cache=npm" >> "$GITHUB_OUTPUT"
+          else
+            echo "pm=npm" >> "$GITHUB_OUTPUT"
+            echo "cache=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Setup Node
+        if: ${{ hashFiles('package.json') != '' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: ${{ steps.nodepm.outputs.cache || '' }}
+
+      - name: Setup Python
+        if: ${{ hashFiles('**/*.py', 'pyproject.toml', 'requirements.txt') != '' }}
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Run ship-safe (if available)
+        if: ${{ hashFiles('scripts/ship-safe.sh') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/ship-safe.sh
+          INSTALL_DEPS=1 bash scripts/ship-safe.sh
+
+      # ------------------------------------------------------------
+      # Fallback checks (only if ship-safe is not present)
+      # ------------------------------------------------------------
+
+      - name: Install Node dependencies (robust)
+        if: ${{ hashFiles('scripts/ship-safe.sh') == '' && hashFiles('package.json') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PM="${{ steps.nodepm.outputs.pm }}"
+
+          if [[ "$PM" == "pnpm" || "$PM" == "yarn" ]]; then
+            corepack enable
+          fi
+
+          case "$PM" in
+            pnpm)
+              if [[ -f pnpm-lock.yaml ]]; then
+                pnpm install --frozen-lockfile
+              else
+                pnpm install
+              fi
+              ;;
+            yarn)
+              if [[ -f .yarnrc.yml ]]; then
+                yarn install --immutable
+              else
+                yarn install --frozen-lockfile || yarn install
+              fi
+              ;;
+            npm)
+              if [[ -f package-lock.json ]]; then
+                npm ci
+              else
+                npm install
+              fi
+              ;;
+            *)
+              echo "Unknown package manager: $PM" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Node lint/test/build (only if scripts exist)
+        if: ${{ hashFiles('scripts/ship-safe.sh') == '' && hashFiles('package.json') != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PM="${{ steps.nodepm.outputs.pm }}"
+
+          has_script() {
+            local s="$1"
+            node -e "const x=require('./package.json').scripts||{}; process.exit(x['${s}']?0:1)"
+          }
+
+          run_script() {
+            local s="$1"
+            if has_script "$s"; then
+              echo "==> run: $s ($PM)"
+              case "$PM" in
+                pnpm) pnpm -s "$s" ;;
+                yarn) yarn -s "$s" ;;
+                npm)  npm run -s "$s" ;;
+              esac
+            else
+              echo "skip: no script '$s'"
+            fi
+          }
+
+          run_script format
+          run_script lint
+          run_script typecheck
+          run_script type-check
+
+          if has_script "test:ci"; then
+            run_script "test:ci"
+          else
+            run_script test
+          fi
+
+          run_script build
+
+      - name: Install Python dependencies (requirements.txt)
+        if: ${{ hashFiles('scripts/ship-safe.sh') == '' && hashFiles('requirements.txt') != '' }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Python compile check
+        if: ${{ hashFiles('scripts/ship-safe.sh') == '' && hashFiles('**/*.py') != '' }}
+        run: python -m compileall -q .
+
+      - name: Pytest (if tests exist)
+        if: ${{ hashFiles('scripts/ship-safe.sh') == '' && hashFiles('**/test_*.py', '**/*_test.py', 'tests/**/*.py') != '' }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest
+          pytest -q

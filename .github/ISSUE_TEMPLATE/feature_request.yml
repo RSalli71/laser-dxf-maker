@@ -1,0 +1,66 @@
+name: ✨ Feature Request
+description: Neue Funktion/Verbesserung vorschlagen – mit Akzeptanzkriterien
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Bitte so ausfüllen, dass ein Dev/Agent direkt loslegen kann.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Motivation
+      description: Welches Problem lösen wir? Warum ist das wichtig?
+      placeholder: "User brechen ab, weil … / Wir brauchen …"
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Lösungsvorschlag
+      description: Wie soll es ungefähr funktionieren?
+      placeholder: "Vorschlag: Wizard 2-Spalten-Layout mit Sticky Summary …"
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Akzeptanzkriterien (Definition of Done)
+      description: Messbar & prüfbar.
+      placeholder: |
+        - [ ] …
+        - [ ] …
+        - [ ] …
+    validations:
+      required: true
+
+  - type: textarea
+    id: ux
+    attributes:
+      label: UX/UI Hinweise (optional)
+      placeholder: "Mock/Skizze/Beispiel-Link …"
+
+  - type: textarea
+    id: analytics
+    attributes:
+      label: Tracking / Events (optional)
+      placeholder: "Event Name, Parameter, wann auslösen …"
+
+  - type: textarea
+    id: out_of_scope
+    attributes:
+      label: Out of Scope (optional)
+      placeholder: "Was bewusst NICHT gemacht wird …"
+
+  - type: checkboxes
+    id: agent_ready
+    attributes:
+      label: Agent/Vibe-Coding
+      options:
+        - label: Kann als Agent-Task umgesetzt werden (klar abgegrenzt)
+        - label: Benötigt vorher Entscheidung/Architektur-Notiz in docs/DECISIONS.md
+        - label: Keine Secrets/Keys in diesem Issue enthalten

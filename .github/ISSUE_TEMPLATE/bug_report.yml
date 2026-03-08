@@ -1,0 +1,93 @@
+name: 🐛 Bug Report
+description: Fehler melden – reproduzierbar, mit Logs/Erwartung vs. Ist
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Danke fürs Melden! Bitte so ausfüllen, dass ein anderer (oder ein Agent) den Bug in <10 Minuten reproduzieren kann.
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Schweregrad
+      options:
+        - Blocker (nichts geht)
+        - Hoch (wichtige Funktion kaputt)
+        - Mittel (Workaround möglich)
+        - Niedrig (Kosmetik/kleiner Fehler)
+    validations:
+      required: true
+
+  - type: input
+    id: affected_area
+    attributes:
+      label: Betroffener Bereich/Modul
+      placeholder: "z.B. Landingpage CTA, Wizard Step 2, API /forecast"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: Was ist passiert?
+      description: Beschreibe den Fehler kurz und konkret.
+      placeholder: "Beim Speichern wird Prozentwert 80% als 80 statt 0.8 gespeichert…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Erwartetes Verhalten
+      placeholder: "80% soll als 0.8 gespeichert werden…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Schritte zur Reproduktion
+      description: Nummeriert, exakt.
+      placeholder: |
+        1) …
+        2) …
+        3) …
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Fehlermeldungen
+      description: Relevante Logs/Stacktraces hier einfügen (ohne Secrets!).
+      render: shell
+      placeholder: "Paste logs…"
+
+  - type: input
+    id: version
+    attributes:
+      label: Version/Commit/Branch
+      placeholder: "z.B. main @ abc123 oder v0.3.1"
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Umgebung
+      description: System + Browser/Runtime.
+      placeholder: |
+        OS: Windows 11
+        Browser: Chrome 123
+        Node: 20.x
+        App-Env: dev/staging/prod
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: regression
+    attributes:
+      label: Regression?
+      options:
+        - label: Das hat früher funktioniert und ist jetzt kaputt (Regression)
+        - label: Ich habe geprüft, dass keine Secrets/Keys im Issue stehen
