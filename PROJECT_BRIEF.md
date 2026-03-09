@@ -3,7 +3,29 @@
 > Füll dieses Dokument aus, bevor du die Agents startest.
 > Ersetze alle `___` mit deinen Angaben. Lass Felder leer wenn unklar.
 >
-> **Danach:** `@requirements-engineer` aufrufen → der macht den Rest.
+> **Danach:** zuerst `docs/workflow.md` beachten und dann den Requirements Engineer ueber `.claude/agents/requirements-engineer.md` starten.
+
+---
+
+## 0. Orientierung nach dem Brief
+
+- Dieser Brief ist nur der Einstiegspunkt.
+- Der naechste kanonische Output ist `docs/requirements/REQUIREMENTS.md`.
+- Danach folgt `docs/ARCHITECTURE.md`.
+- QA-Ergebnisse landen spaeter in `docs/reports/TEST_REPORT.md`.
+- Wichtige Aenderungen und Entscheidungen werden in `docs/DEVLOG.md` und `docs/DECISIONS.md` festgehalten.
+- Der komplette Ablauf steht in `docs/workflow.md`.
+
+### Zustaendige Folge-Rollen
+
+- Requirements Engineer: `.claude/agents/requirements-engineer.md`
+- Solution Architect: `.claude/agents/solution-architect.md`
+- Frontend Developer: `.claude/agents/frontend-developer.md`
+- Backend Developer: `.claude/agents/backend-developer.md`
+- Database Engineer: `.claude/agents/database-engineer.md`
+- QA Engineer: `.claude/agents/qa-engineer.md`
+- Code Reviewer: `.claude/agents/code-reviewer.md`
+- Gatekeeper: `.claude/agents/gatekeeper.md`
 
 ---
 
@@ -42,7 +64,7 @@ Was kommt später? Hilft den Agents, den Scope zu begrenzen.
 
 ## 5. Tech-Stack
 
-Das Template bringt bereits mit: Next.js 15, React 19, Tailwind CSS v4, shadcn/ui, Framer Motion, Lucide Icons.
+Das Template bringt bereits mit: Next.js 16, React 19, Tailwind CSS v4, shadcn/ui, Framer Motion, Lucide Icons.
 Füll nur aus, was **zusätzlich** nötig ist oder vom Default abweicht.
 
 | Entscheidung | Deine Wahl | Template-Default |
@@ -77,3 +99,12 @@ Apps oder Websites, die ähnlich aussehen/funktionieren sollen?
 Besonderheiten, Einschränkungen, Wünsche?
 
 > ___
+
+---
+
+## 9. Uebergabe-Regel nach dem Ausfuellen
+
+- Brief fertigstellen.
+- `docs/workflow.md` kurz gegenlesen.
+- Danach den Requirements Engineer starten.
+- Keine Architektur, Tests oder Implementierungsdetails direkt hier festhalten, wenn sie spaeter in die kanonischen Dateien unter `docs/` gehoeren.

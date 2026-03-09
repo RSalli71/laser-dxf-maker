@@ -1,13 +1,13 @@
 # Universal Project Template — Next.js + Vibe Coding
 
-Projekt-Template für **Next.js 15**-Anwendungen mit AI-gestütztem Development.
+Projekt-Template für **Next.js 16**-Anwendungen mit AI-gestütztem Development.
 Liefert Struktur, Qualität und Dokumentation von Anfang an — optimiert für Claude Code, Cursor, Copilot & Co.
 
 ## Tech Stack
 
 | Kategorie | Technologie |
 |---|---|
-| **Framework** | Next.js 15 (App Router) + React 19 |
+| **Framework** | Next.js 16 (App Router) + React 19 |
 | **Sprache** | TypeScript (Strict Mode) |
 | **Styling** | Tailwind CSS v4 + shadcn/ui (New York) |
 | **Animationen** | Framer Motion |
@@ -34,11 +34,29 @@ npm install
 npx shadcn@latest init
 
 # 4. PROJECT_BRIEF.md ausfüllen
-# Dann: @requirements-engineer in Claude Code aufrufen
+# Dann: docs/workflow.md gegenlesen und `.claude/agents/requirements-engineer.md` starten
 
 # 5. Entwicklungsserver starten
 npm run dev
 ```
+
+## Ablauf auf einen Blick
+
+```mermaid
+flowchart LR
+	A[PROJECT_BRIEF.md ausfuellen] --> B[docs/workflow.md gegenlesen]
+	B --> C[Requirements Engineer]
+	C --> D[docs/requirements/REQUIREMENTS.md]
+	D --> E[Solution Architect]
+	E --> F[docs/ARCHITECTURE.md]
+	F --> G[Developer-Phase in src/]
+	G --> H[QA Engineer]
+	H --> I[docs/reports/TEST_REPORT.md]
+	I --> J[Code Reviewer]
+	J --> K[Gatekeeper]
+```
+
+Die Referenz fuer den Ablauf bleibt [docs/workflow.md](docs/workflow.md). Die Grafik ist nur die Kurzfassung fuer den Einstieg.
 
 ---
 
@@ -63,20 +81,28 @@ Klare Trennung zwischen **Exploration** und **Produktion**:
 
 ### PROJECT_BRIEF.md
 
-Zentrales Intake-Dokument mit 8 Sections (Projektname, Zielgruppen, MVP-Features, Tech-Stack, etc.).
-Workflow: **Ausfüllen → `@requirements-engineer` aufrufen → Agent orchestriert den Rest.**
+Zentrales Intake-Dokument fuer den Start jedes Projekts.
+Workflow: **Ausfuellen → `docs/workflow.md` gegenlesen → Requirements Engineer ueber `.claude/agents/requirements-engineer.md` starten.**
 
-### Agent-Personas (7)
+Kanonische Folgeartefakte:
+- `docs/requirements/REQUIREMENTS.md`
+- `docs/ARCHITECTURE.md`
+- `docs/reports/TEST_REPORT.md`
+- `docs/DEVLOG.md`
+- `docs/DECISIONS.md`
+
+### Agent-Personas (8)
 
 Spezialisierte Rollen unter `.claude/agents/`:
 
 | Agent | Aufgabe |
 |---|---|
-| **Requirements Engineer** | Analysiert Brief, erstellt Anforderungen, orchestriert Agents |
+| **Requirements Engineer** | Analysiert Brief und erstellt `docs/requirements/REQUIREMENTS.md` |
 | **Solution Architect** | Architektur, Datenmodell, API-Design |
 | **Frontend Developer** | UI-Komponenten, Pages, Layouts |
+| **Backend Developer** | Server-Logik, APIs, Import-Pipelines und Library-Code |
 | **Database Engineer** | DB-Schema, Migrations, ORM |
-| **QA Engineer** | Testplanung und -erstellung |
+| **QA Engineer** | Testplanung, Testausfuehrung und `docs/reports/TEST_REPORT.md` |
 | **Code Reviewer** | Code-Reviews nach Best Practices |
 | **Gatekeeper** | Quality-Gate vor Merge |
 
@@ -84,17 +110,18 @@ Spezialisierte Rollen unter `.claude/agents/`:
 
 | Skill | Beschreibung |
 |---|---|
-| **next-best-practices** | Next.js 15+ Patterns (Vercel offiziell, 20+ Dateien) |
+| **next-best-practices** | Next.js App-Router-Patterns, RSC-Grenzen, Datenmuster und Runtime-Regeln |
 | **vercel-react-best-practices** | React Performance (Vercel offiziell, 57 Regeln) |
 | **tailwind-v4-shadcn** | Tailwind v4 + shadcn/ui Setup & Migration |
 | **framer-motion** | Animations-Performance (42 Regeln) |
 | **conventional-commit** | Commit-Message-Format |
 
-Skills liegen in `.agents/skills/` und sind per Symlink für alle AI-Tools verfügbar (Claude Code, Cursor, Copilot, Gemini CLI, etc.).
+Die kanonische Skill-Quelle ist `.agents/skills/`.
+Kompatibilitaetspfade wie `.claude/skills/` und `skills/` verweisen auf denselben Skill-Bestand.
 
 ### Regeln (AGENTS.md)
 
-7 Sections: Kleine Schritte, Qualität, Sicherheit, Doku-Pflicht, Next.js Konventionen, Styling & UI, Animationen.
+`AGENTS.md` ist die zentrale Navigations- und Regeldatei fuer Rollen, kanonische `docs/`-Pfade, Handoffs und Projektkonventionen.
 
 ---
 
@@ -133,15 +160,25 @@ INSTALL_DEPS=1 bash scripts/ship-safe.sh
 
 ```
 ├── .agents/skills/          # 5 Skills (Quelldateien)
-├── .claude/agents/          # 7 Agent-Personas
+├── .claude/agents/          # 8 operative Agent-Rollen
 ├── .github/workflows/       # CI/CD Pipeline
 ├── docs/
 │   ├── ARCHITECTURE.md      # Tech Stack & Projektziel
 │   ├── DECISIONS.md         # Architektur-Entscheidungen
 │   ├── DEVLOG.md            # Session-Logs
-│   ├── Repo-Template-Beschreibung.md  # Detaillierte Beschreibung
-│   └── Templatestructur.md  # Vollständige Verzeichnisstruktur
+│   ├── Templatestructur.md  # Vollständige Verzeichnisstruktur
+│   ├── workflow.md          # Kanonischer Ablauf und Handoffs
+│   ├── requirements/
+│   │   └── REQUIREMENTS.md  # Fachliche Anforderungen
+│   ├── reports/
+│   │   └── TEST_REPORT.md   # QA-Ergebnisse und Teststatus
+│   ├── knowledge/           # Obsidian-Wissensnotizen und Templates
+│   └── team-doku/
+│       └── Repo-Template-Beschreibung.md  # Detaillierte interne Template-Beschreibung
 ├── scripts/                 # ship-safe, init-template, debug-helper, update-devlog
+├── tests/                   # Unit-, Integrations- und weitere Tests
+├── tools/                   # Hilfsprogramme, Konverter und Utilities
+├── data/                    # Samples, Fixtures und Korrekturen
 ├── src/                     # Produktionscode
 ├── vibe/                    # Prototypen & Spikes
 ├── AGENTS.md                # AI/Agent-Regeln
@@ -160,7 +197,9 @@ INSTALL_DEPS=1 bash scripts/ship-safe.sh
 |---|---|
 | `docs/DEVLOG.md` | Nach jeder relevanten Arbeitseinheit |
 | `docs/DECISIONS.md` | Bei wichtigen "Warum?"-Entscheidungen |
+| `docs/requirements/REQUIREMENTS.md` | Wenn sich fachliche Anforderungen aendern |
 | `docs/ARCHITECTURE.md` | Bei Stack-Änderungen |
+| `docs/reports/TEST_REPORT.md` | Wenn QA-Artefakte oder Testergebnisse erwartet sind |
 
 ```bash
 # DEVLOG automatisch aktualisieren (mit letzten Commits)

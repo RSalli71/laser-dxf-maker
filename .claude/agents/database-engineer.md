@@ -12,11 +12,29 @@ Du bist Database Engineer. Dein Job: das Datenmodell aus `docs/ARCHITECTURE.md` 
 ## Kontext: Bestehendes Template
 
 - **Regeln:** `AGENTS.md` (lies §3 Sicherheit besonders!)
+- **Workflow:** `docs/workflow.md` (Reihenfolge und Übergaben, besonders Schritt 4)
 - **Architektur:** `docs/ARCHITECTURE.md` (Datenmodell, RLS, Auth-Setup)
-- **Requirements:** `docs/REQUIREMENTS.md` (Rollen, Features – für Kontext)
+- **Requirements:** `docs/requirements/REQUIREMENTS.md` (Rollen, Features – für Kontext)
 - **Bestehender Stack:** `package.json` (prüfe was schon installiert ist)
 - **Secrets-Regel:** NIEMALS Keys/Passwörter in Code oder Doku (AGENTS.md §3)
 - **Code-Ziel:** `src/` (Produktionscode), NICHT `vibe/`
+
+## Leseverzeichnisse
+
+- Root: `AGENTS.md`, `package.json`, `.env.example`
+- `docs/`: `workflow.md`, `ARCHITECTURE.md`, `DECISIONS.md`
+- `docs/requirements/`: `REQUIREMENTS.md`
+- `src/`: bestehende Types, Validierungen und Lib-Module als Referenz
+
+## Schreibziele
+
+- `src/types/`
+- `src/lib/`
+- `src/lib/validations/`
+- `prisma/` oder `supabase/` fuer Schema und Migrationen, je nach gewaehltem Stack
+- optional `data/` fuer Seed-Samples oder Entwicklungsfixtures, wenn die Architektur das vorsieht
+
+Schreibe keine DB-Artefakte nach `vibe/`. Produktive DB-Typen und Helfer gehoeren nach `src/`.
 
 ## Ablauf
 
@@ -24,9 +42,10 @@ Du bist Database Engineer. Dein Job: das Datenmodell aus `docs/ARCHITECTURE.md` 
 
 Lies (PFLICHT):
 1. `AGENTS.md` (Konventionen)
-2. `docs/ARCHITECTURE.md` (Datenmodell, RLS, Indexes – ohne das: STOPP)
-3. `docs/REQUIREMENTS.md` (Rollen, Features)
-4. `package.json` (vorhandene Dependencies)
+2. `docs/workflow.md` (welcher Schritt gerade dran ist, welche Outputs erwartet werden)
+3. `docs/ARCHITECTURE.md` (Datenmodell, RLS, Indexes – ohne das: STOPP)
+4. `docs/requirements/REQUIREMENTS.md` (Rollen, Features)
+5. `package.json` (vorhandene Dependencies)
 
 ### Schritt 2 – Dependencies installieren
 

@@ -56,6 +56,24 @@ Create an entry when the decision has **long-term impact**, e.g.:
 
 ---
 
+### 2026-03-08 — Canonical skill source in `.agents/skills`
+- **Status:** Accepted
+- **Context:**
+  - Das Repo enthielt identische Skills unter `.agents/skills`, `.claude/skills`, `skills` und `.vibe/skills` als getrennte physische Ordner.
+  - Die Duplikate erhöhen Pflegeaufwand und Drift-Risiko, obwohl verschiedene Tools dieselben Inhalte erwarten.
+- **Decision:**
+  - `.agents/skills` ist die einzige kanonische Quelle.
+  - Tool-spezifische Kompatibilitätspfade werden als Junctions/Links darauf abgebildet, nicht als eigene Kopien gepflegt.
+- **Alternatives:**
+  - A) Jede Tool-Integration mit eigenem physischen Skill-Ordner weiterführen
+  - B) Nur einen Pfad behalten und Kompatibilität für andere Tools manuell wiederherstellen
+- **Consequences:**
+  - **Positive:** Single Source of Truth, kein Inhaltsdrift zwischen Tool-Pfaden, geringerer Pflegeaufwand.
+  - **Negative:** Lokale Entwicklung ist auf funktionierende Junctions/Links im Dateisystem angewiesen.
+- **Related:** `docs/DEVLOG.md`
+
+---
+
 ## Best Practices
 - **Scope:** Focus on decisions with long-term impact.
 - **Clarity:** Use bullet points; add short snippets if they clarify.

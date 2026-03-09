@@ -9,13 +9,9 @@
 ```
 project-template-vibe-coding/
 │
-├── .agent/                                          # Agent-Regeln & Workflows (Antigravity etc.)
-│   ├── rules/
-│   │   └── 00-general.md                            # Universelle Agent-Leitlinien (8 Regeln)
-│   ├── skills/                                      # Symlinks → .agents/skills/
-│   └── workflows/
-│       ├── debug-bug.md                             # 6-Schritte Bug-Debugging-Workflow
-│       └── ship-safe.md                             # Pre-Merge Sicherheits-Checkliste
+├── data/                                           # Trainingsdaten, Beispieldaten und Samples
+├── tools/                                          # Hilfsprogramme, Utilities und kleine Helfer
+├── tests/                                          # Testsuites, Testdaten und QA-Artefakte
 │
 ├── .agents/skills/                                  # Skill-Bibliothek (Quelldateien)
 │   ├── conventional-commit/
@@ -24,7 +20,7 @@ project-template-vibe-coding/
 │   │   ├── SKILL.md                                 # Übersicht & Schnellreferenz
 │   │   └── references/                              # 42 Detail-Regeln (Animationen, Performance)
 │   ├── next-best-practices/
-│   │   ├── SKILL.md                                 # Next.js 15+ Übersicht
+│   │   ├── SKILL.md                                 # Next.js App-Router Übersicht
 │   │   ├── async-patterns.md                        # Async/Await Patterns
 │   │   ├── bundling.md                              # ESM/CommonJS, Code Splitting
 │   │   ├── data-patterns.md                         # Server Components vs Actions
@@ -71,6 +67,7 @@ project-template-vibe-coding/
 │
 ├── .claude/                                         # Claude Code Einstellungen
 │   ├── agents/                                      # Agent-Personas (spezialisierte Rollen)
+│   │   ├── backend-developer.md                     # Backend-Entwickler Agent
 │   │   ├── code-reviewer.md                         # Code-Review Agent
 │   │   ├── database-engineer.md                     # Datenbank-Design & Migrations Agent
 │   │   ├── frontend-developer.md                    # Frontend-Entwickler Agent
@@ -82,9 +79,7 @@ project-template-vibe-coding/
 │   ├── settings.local.json                          # Lokale Permissions (nicht committen)
 │   └── skills/                                      # Symlinks → .agents/skills/
 │
-├── .cursor/                                         # Cursor IDE Symlinks → .agents/skills/ (nur wenn Cursor installiert)
-├── .vibe/                                           # Mistral Vibe Symlinks → .agents/skills/ (nur wenn Vibe installiert)
-├── skills/                                          # Universal-Symlinks → .agents/skills/
+├── skills/                                          # Universal-Junction → .agents/skills/
 │
 ├── .github/                                         # GitHub-Konfiguration
 │   ├── copilot-instructions.md                      # Repo-weite Copilot-Richtlinien
@@ -105,8 +100,22 @@ project-template-vibe-coding/
 │   ├── ARCHITECTURE.md                              # Tech Stack & Projektziel
 │   ├── DECISIONS.md                                 # Architektur-Entscheidungen (ADRs)
 │   ├── DEVLOG.md                                    # Session-Logs & Entwicklungsnotizen
-│   ├── Repo-Template-Beschreibung.md                 # Detaillierte Template-Beschreibung
-│   └── Templatestructur.md                          # Diese Datei
+│   ├── Templatestructur.md                          # Diese Datei
+│   ├── architecture/                                # Architektur-Unterlagen (Detailkonzepte)
+│   ├── concepts/                                    # Fachliche und technische Konzepte
+│   ├── knowledge/                                   # Obsidian-Wissensnotizen und Templates
+│   ├── phases/                                      # Projektphasen / Meilensteine
+│   ├── planning/                                    # Planungsdokumente
+│   ├── prompts/                                     # Prompt-Sammlungen
+│   ├── reports/                                     # Reports / QA / Auswertungen
+│   │   └── TEST_REPORT.md                           # Kanonischer QA-Report
+│   ├── requirements/                                # Anforderungen / User Stories
+│   │   └── REQUIREMENTS.md                          # Kanonische fachliche Anforderungen
+│   ├── security/                                    # Security-spezifische Dokumente
+│   └── team-doku/                                   # Team-interne Doku
+│       ├── Repo-Template-Beschreibung.md            # Detaillierte interne Template-Beschreibung
+│       ├── debug-bug.md                             # Team-Workflow für Bug-Debugging
+│       └── ship-safe.md                             # Team-Checklist für sichere Übergaben
 │
 ├── scripts/                                         # Automatisierungs-Scripts
 │   ├── debug-helper.sh                              # Log-Debugging (Pattern-basiert)
@@ -126,10 +135,11 @@ project-template-vibe-coding/
 ├── .env.example                                     # Umgebungsvariablen-Vorlage
 ├── .gitattributes                                   # Git LF-Normalisierung
 ├── .gitignore                                       # Ignore-Patterns (Node, Python, Secrets)
+├── package-lock.json                                # npm Lockfile für reproduzierbare Installationen
 ├── .pre-commit-config.yaml                          # Pre-commit Hooks (6 Checks)
 ├── .prettierignore                                  # Prettier Ignore-Patterns
 ├── .prettierrc                                      # Prettier Konfiguration
-├── AGENTS.md                                        # AI/Agent-Regeln (7 Sections)
+├── AGENTS.md                                        # AI/Agent-Regeln, Rollen, Handoffs und kanonische Pfade
 ├── CONTRIBUTING.md                                  # Beitragsrichtlinien
 ├── LICENSE                                          # Lizenz (MIT, Platzhalter)
 ├── PROJECT_BRIEF.md                                 # Projekt-Briefing (Platzhalter zum Ausfüllen)
@@ -155,7 +165,11 @@ project-template-vibe-coding/
 | `CONTRIBUTING.md` | Beitragsrichtlinien (Issues → Branch → PR) |
 | `SECURITY.md` | Vulnerability-Reporting (E-Mail, kein öffentliches Issue) |
 | `LICENSE` | MIT-Lizenz (Platzhalter für Name/Org) |
-| `package.json` | Next.js 15, React 19, Tailwind v4, Framer Motion, shadcn/ui |
+| `data/` | Trainingsdaten, Beispieldaten und Samples |
+| `tools/` | Hilfsprogramme, Utilities und kleine Helfer |
+| `tests/` | Testsuites, Testdaten und QA-Artefakte |
+| `package.json` | Next.js 16, React 19, Tailwind v4, Framer Motion, Lucide |
+| `package-lock.json` | Lockfile für reproduzierbare npm-Installationen |
 | `tsconfig.json` | TypeScript Strict, Path-Alias `@/` → `src/`, `vibe/` excluded |
 | `next.config.ts` | React Strict Mode |
 | `eslint.config.mjs` | ESLint (next/core-web-vitals + TypeScript), `vibe/` ignored |
@@ -169,21 +183,22 @@ project-template-vibe-coding/
 
 ---
 
-## Agent-Personas (7)
+## Agent-Personas (8)
 
 Spezialisierte Agent-Rollen unter `.claude/agents/`, die als Kontext für Claude Code dienen:
 
 | Agent | Datei | Aufgabe |
 |---|---|---|
-| **Requirements Engineer** | `requirements-engineer.md` | Analysiert PROJECT_BRIEF.md und erstellt Anforderungen |
+| **Requirements Engineer** | `requirements-engineer.md` | Analysiert PROJECT_BRIEF.md und erstellt `docs/requirements/REQUIREMENTS.md` |
 | **Solution Architect** | `solution-architect.md` | Entwirft Architektur, Datenmodell und API-Design |
 | **Frontend Developer** | `frontend-developer.md` | Implementiert UI-Komponenten, Pages und Layouts |
+| **Backend Developer** | `backend-developer.md` | Implementiert Server-Logik, APIs, Import-Pipelines und Library-Code |
 | **Database Engineer** | `database-engineer.md` | Datenbank-Schema, Migrations und ORM-Konfiguration |
-| **QA Engineer** | `qa-engineer.md` | Testplanung, Test-Erstellung und Qualitätsprüfung |
+| **QA Engineer** | `qa-engineer.md` | Testplanung, Test-Erstellung und `docs/reports/TEST_REPORT.md` |
 | **Code Reviewer** | `code-reviewer.md` | Code-Reviews nach Best Practices und Konventionen |
 | **Gatekeeper** | `gatekeeper.md` | Quality-Gate vor Merge: Prüft Vollständigkeit und Standards |
 
-**Workflow:** `PROJECT_BRIEF.md` ausfüllen → `@requirements-engineer` aufrufen → der orchestriert die weiteren Agents.
+**Workflow:** `PROJECT_BRIEF.md` ausfuellen → `docs/workflow.md` gegenlesen → `.claude/agents/requirements-engineer.md` starten → weitere Rollen gemaess Workflow einsetzen.
 
 ---
 
@@ -193,13 +208,25 @@ Spezialisierte Agent-Rollen unter `.claude/agents/`, die als Kontext für Claude
 |---|---|---|---|
 | `conventional-commit` | marcelorodrigo/agent-skills | 1 | Commit-Message-Format (feat, fix, chore, ...) |
 | `framer-motion` | pproenca/dot-skills | 42 | Animations-Performance & Patterns |
-| `next-best-practices` | vercel-labs/next-skills | 20+ | Next.js 15+ Best Practices (Vercel offiziell) |
+| `next-best-practices` | vercel-labs/next-skills | 20+ | Next.js App-Router, RSC, Datenmuster und Runtime-Regeln |
 | `tailwind-v4-shadcn` | jezweb/claude-skills | 8+ | Tailwind v4 + shadcn/ui Setup & Migration |
 | `vercel-react-best-practices` | vercel-labs/agent-skills | 57 | React Performance (Vercel offiziell) |
 
-**Hinweis:** Die Skills liegen als Quelldateien in `.agents/skills/`. Die Ordner `.claude/skills/`, `skills/` und `.agent/skills/` enthalten **Symlinks** darauf, damit verschiedene AI-Agents (Claude Code, Copilot, etc.) automatisch Zugriff haben.
+**Hinweis:** Die Skills liegen als Quelldateien ausschliesslich in `.agents/skills/`. Die Pfade `.claude/skills/` und `skills/` sind Kompatibilitaetspfade und zeigen als Junctions auf diese kanonische Quelle.
 
-> **Optionale Symlinks:** `.cursor/` und `.vibe/` werden nur angelegt, wenn die jeweilige IDE (Cursor bzw. Mistral Vibe) auf dem System installiert ist. Auf Windows werden Symlinks als Junction-Points erstellt — der Glob-basierte Dateibaum in manchen Tools zeigt sie daher nicht an, Datei-Zugriffe funktionieren aber normal.
+> **Optionale Kompatibilitätspfade:** Zusätzliche tool-spezifische Pfade wie `.vibe/skills/`, `.cursor/skills/` oder `.agent/skills/` sollten nur angelegt werden, wenn das jeweilige Tool sie wirklich benötigt. Auf Windows werden solche Referenzen typischerweise als Junction-Points erstellt.
+
+---
+
+## Optionale Tool-Pfade
+
+| Pfad | Zweck | Status |
+|---|---|---|
+| `.claude/skills/` | Claude-Code Zugriff auf die gemeinsamen Skills | aktiv im Repo, als Junction |
+| `skills/` | neutraler Kompatibilitätspfad für Copilot, Gemini CLI, OpenCode, Replit etc. | aktiv im Repo, als Junction |
+| `.vibe/skills/` | Mistral-Vibe Kompatibilität | optional, nur bei Nutzung sinnvoll |
+| `.cursor/skills/` | Cursor-Kompatibilität | optional |
+| `.agent/skills/` | ältere/alternative Tooling-Kompatibilität | optional |
 
 ---
 
