@@ -1,0 +1,234 @@
+/**
+ * EntityPath -- Rendert eine einzelne DXF-Entity als SVG-Pfad.
+ *
+ * Verwendet React.memo um unnoetige Re-Renders bei Zoom/Pan zu vermeiden.
+ *
+ * Unterstuetzte Entity-Typen: LINE, ARC, CIRCLE, LWPOLYLINE
+ * (TEXT wird nicht als Pfad gerendert, DIMENSION wird vom Cleaner entfernt)
+ *
+ * Visuelles Feedback basiert auf:
+ * - classification (CUT_OUTER, CUT_INNER, BEND, ENGRAVE)
+ * - partId (zugeordnetes Teil)
+ * - isSelected (vom Benutzer selektiert)
+ *
+ * Adapted from DXF-Kalkulator EntityPath.tsx for Laser DXF-Maker.
+ */
+
+import { memo } from "react";
+import type { DxfEntityV2 } from "@/types/dxf-v2";
+import type { ClassificationType } from "@/types/classification";
+import { LAYER_CONFIGS } from "@/types/classification";
+
+/** ACI-Farben Mapping (Subset der 256 AutoCAD-Farben) */
+const ACI_COLORS: Record<number, string> = {
+  0: "#808080", // ByBlock -> Grau
+  1: "#ff0000", // Rot
+  2: "#ffff00", // Gelb
+  3: "#00cc00", // Gruen
+  4: "#00aacc", // Cyan
+  5: "#0000ff", // Blau
+  6: "#cc00cc", // Magenta
+  7: "#1a1a1a", // Weiss -> Dunkelgrau (auf hellem Hintergrund)
+  8: "#555555", // Dunkelgrau
+  9: "#888888", // Hellgrau
+  256: "#808080", // ByLayer -> Grau
+};
+
+/** Default-Farbe fuer nicht gemappte ACI-Nummern */
+const DEFAULT_COLOR = "#555555";
+
+/** Classification to hex color mapping */
+const CLASSIFICATION_COLORS: Record<ClassificationType, string> = {
+  CUT_OUTER: LAYER_CONFIGS[0].hexColor,
+  CUT_INNER: LAYER_CONFIGS[1].hexColor,
+  BEND: LAYER_CONFIGS[2].hexColor,
+  ENGRAVE: LAYER_CONFIGS[3].hexColor,
+};
+
+/**
+ * Umfaerbt helle Farben die auf dem hellen Canvas unsichtbar waeren.
+ */
+function resolveEntityColor(color: string): string {
+  const normalized = color.toLowerCase().trim();
+  if (
+    normalized === "#ffffff" ||
+    normalized === "white" ||
+    normalized === "#fff"
+  ) {
+    return "#1a1a1a";
+  }
+  return color;
+}
+
+interface EntityPathProps {
+  entity: DxfEntityV2;
+  /** Whether this entity is currently selected (highlight) */
+  isSelected?: boolean;
+  /** Whether this entity is hovered */
+  isHovered?: boolean;
+  /** Whether other entities are selected and this one is not part of them */
+  isDimmed?: boolean;
+  /** Whether this entity belongs to a part (has partId set) */
+  isAssigned?: boolean;
+}
+
+/**
+ * Rendert eine einzelne DXF-Entity als SVG-Pfad.
+ */
+function EntityPathInner({
+  entity,
+  isSelected = false,
+  isHovered = false,
+  isDimmed = false,
+  isAssigned = false,
+}: EntityPathProps) {
+  const d = entityToSvgPath(entity);
+  if (!d) return null;
+
+  // Determine stroke color, width, opacity
+  let stroke: string;
+  let sw: number;
+  let opacity: number;
+  let dashArray: string | undefined;
+
+  if (isSelected) {
+    // Selected entity: bright highlight
+    stroke = "hsl(210, 100%, 50%)";
+    sw = 2.5;
+    opacity = 1;
+  } else if (isHovered) {
+    stroke = "hsl(210, 80%, 60%)";
+    sw = 2;
+    opacity = 0.9;
+  } else if (entity.classification) {
+    // Classified entity: use classification color
+    stroke = CLASSIFICATION_COLORS[entity.classification];
+    sw = 1.5;
+    opacity = 1;
+  } else if (isDimmed) {
+    // Dimmed when other things are selected
+    const rawColor = ACI_COLORS[entity.color] ?? DEFAULT_COLOR;
+    stroke = resolveEntityColor(rawColor);
+    sw = 1;
+    opacity = 0.15;
+  } else if (isAssigned) {
+    // Assigned to a part but not classified yet
+    const rawColor = ACI_COLORS[entity.color] ?? DEFAULT_COLOR;
+    stroke = resolveEntityColor(rawColor);
+    sw = 1.5;
+    opacity = 0.8;
+  } else {
+    // Default: use DXF ACI color
+    const rawColor = ACI_COLORS[entity.color] ?? DEFAULT_COLOR;
+    stroke = resolveEntityColor(rawColor);
+    sw = 1.5;
+    opacity = 1;
+  }
+
+  return (
+    <path
+      data-entity-id={entity.id}
+      d={d}
+      stroke={stroke}
+      strokeWidth={sw}
+      fill="none"
+      opacity={opacity}
+      strokeDasharray={dashArray}
+      vectorEffect="non-scaling-stroke"
+      className="pointer-events-stroke"
+    />
+  );
+}
+
+/**
+ * Wandelt eine DxfEntityV2 in einen SVG-Path-d-String um.
+ */
+function entityToSvgPath(entity: DxfEntityV2): string | null {
+  const c = entity.coordinates;
+
+  switch (entity.type) {
+    case "LINE":
+      return lineToPath(c);
+    case "ARC":
+      return arcToPath(c);
+    case "CIRCLE":
+      return circleToPath(c);
+    case "LWPOLYLINE":
+      return polylineToPath(c, entity.closed);
+    default:
+      return null;
+  }
+}
+
+function lineToPath(c: DxfEntityV2["coordinates"]): string | null {
+  if (
+    c.x1 === undefined ||
+    c.y1 === undefined ||
+    c.x2 === undefined ||
+    c.y2 === undefined
+  ) {
+    return null;
+  }
+  return `M${c.x1},${c.y1} L${c.x2},${c.y2}`;
+}
+
+function arcToPath(c: DxfEntityV2["coordinates"]): string | null {
+  if (
+    c.cx === undefined ||
+    c.cy === undefined ||
+    c.r === undefined ||
+    c.startAngle === undefined ||
+    c.endAngle === undefined
+  ) {
+    return null;
+  }
+
+  const startRad = (c.startAngle * Math.PI) / 180;
+  let endRad = (c.endAngle * Math.PI) / 180;
+
+  // DXF-Winkel CCW; wenn end < start -> +2pi
+  if (endRad <= startRad) endRad += 2 * Math.PI;
+
+  const x1 = c.cx + c.r * Math.cos(startRad);
+  const y1 = c.cy + c.r * Math.sin(startRad);
+  const x2 = c.cx + c.r * Math.cos(endRad);
+  const y2 = c.cy + c.r * Math.sin(endRad);
+
+  const largeArc = endRad - startRad > Math.PI ? 1 : 0;
+  const sweep = 1; // CCW in DXF -> sweep=1 in SVG (wegen scale(1,-1))
+
+  return `M${x1},${y1} A${c.r},${c.r} 0 ${largeArc},${sweep} ${x2},${y2}`;
+}
+
+function circleToPath(c: DxfEntityV2["coordinates"]): string | null {
+  if (c.cx === undefined || c.cy === undefined || c.r === undefined) {
+    return null;
+  }
+
+  // SVG-Kreis als zwei Halbkreis-Boegen
+  const r = c.r;
+  return [
+    `M${c.cx - r},${c.cy}`,
+    `A${r},${r} 0 1,0 ${c.cx + r},${c.cy}`,
+    `A${r},${r} 0 1,0 ${c.cx - r},${c.cy}`,
+    "Z",
+  ].join(" ");
+}
+
+function polylineToPath(
+  c: DxfEntityV2["coordinates"],
+  closed?: boolean,
+): string | null {
+  if (!c.points || c.points.length < 2) return null;
+
+  const parts: string[] = [`M${c.points[0].x},${c.points[0].y}`];
+  for (let i = 1; i < c.points.length; i++) {
+    parts.push(`L${c.points[i].x},${c.points[i].y}`);
+  }
+  if (closed) parts.push("Z");
+
+  return parts.join(" ");
+}
+
+export const EntityPath = memo(EntityPathInner);
+EntityPath.displayName = "EntityPath";

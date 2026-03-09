@@ -1,22 +1,21 @@
-# Projekt-Brief
+# Projekt-Brief — Laser DXF-Maker
 
-> Füll dieses Dokument aus, bevor du die Agents startest.
-> Ersetze alle `___` mit deinen Angaben. Lass Felder leer wenn unklar.
->
-> **Danach:** zuerst `docs/workflow.md` beachten und dann den Requirements Engineer ueber `.claude/agents/requirements-engineer.md` starten.
+> Dieser Brief ist der Einstiegspunkt für alle Agenten.
+> Danach: `docs/workflow.md` beachten und dann den
+> Requirements Engineer über `.claude/agents/requirements-engineer.md` starten.
 
 ---
 
 ## 0. Orientierung nach dem Brief
 
 - Dieser Brief ist nur der Einstiegspunkt.
-- Der naechste kanonische Output ist `docs/requirements/REQUIREMENTS.md`.
+- Der nächste kanonische Output ist `docs/requirements/REQUIREMENTS.md`.
 - Danach folgt `docs/ARCHITECTURE.md`.
-- QA-Ergebnisse landen spaeter in `docs/reports/TEST_REPORT.md`.
-- Wichtige Aenderungen und Entscheidungen werden in `docs/DEVLOG.md` und `docs/DECISIONS.md` festgehalten.
+- QA-Ergebnisse landen später in `docs/reports/TEST_REPORT.md`.
+- Wichtige Änderungen in `docs/DEVLOG.md` und `docs/DECISIONS.md`.
 - Der komplette Ablauf steht in `docs/workflow.md`.
 
-### Zustaendige Folge-Rollen
+### Zuständige Folge-Rollen
 
 - Requirements Engineer: `.claude/agents/requirements-engineer.md`
 - Solution Architect: `.claude/agents/solution-architect.md`
@@ -31,80 +30,162 @@
 
 ## 1. Projektname & Einzeiler
 
-- **Name:** ___
-- **Was macht die App in einem Satz?** ___
-- **Beispiel:** "Terminbuchung für Friseursalons – Kunden buchen online, Inhaber verwalten Kalender."
-
-## 2. Zielgruppen / Rollen
-
-Wer benutzt die App? Mindestens 2 Rollen angeben.
-
-| Rolle | Beschreibung | Beispiel-Aktionen |
-|-------|-------------|-------------------|
-| ___ | ___ | ___ |
-| ___ | ___ | ___ |
-| ___ (optional) | ___ | ___ |
-
-## 3. Kern-Features (MVP)
-
-Die **3–5 wichtigsten** Features. Nur was zum Launch da sein MUSS.
-
-1. ___
-2. ___
-3. ___
-4. ___ (optional)
-5. ___ (optional)
-
-## 4. Nice-to-Have (nach MVP)
-
-Was kommt später? Hilft den Agents, den Scope zu begrenzen.
-
-- ___
-- ___
-
-## 5. Tech-Stack
-
-Das Template bringt bereits mit: Next.js 16, React 19, Tailwind CSS v4, shadcn/ui, Framer Motion, Lucide Icons.
-Füll nur aus, was **zusätzlich** nötig ist oder vom Default abweicht.
-
-| Entscheidung | Deine Wahl | Template-Default |
-|-------------|-----------|-----------------|
-| **Datenbank** | ___ | (keiner – ausfüllen!) |
-| **Auth** | ___ | (keiner – ausfüllen!) |
-| **ORM / DB-Client** | ___ | (keiner – ausfüllen!) |
-| **Hosting** | ___ | `Vercel` |
-| **E-Mail** | ___ | (keiner – nur wenn nötig) |
-| **File-Upload** | ___ | (keiner – nur wenn nötig) |
-| **Payment** | ___ | (keiner – nur wenn nötig) |
-
-## 6. Komplexität
-
-Wähle EINE Option – steuert wie viel Auth/RBAC/Infrastruktur generiert wird.
-
-- [ ] **Simple** – Login/Logout, 1–2 Rollen, kein Multi-Tenant
-- [ ] **Standard** – 2–3 Rollen mit unterschiedlichen Rechten, Row-Level-Security
-- [ ] **Enterprise** – Multi-Tenant, Permission-Matrix, Audit-Logs
-
-> **Tipp:** Starte mit Simple. Upgraden geht immer.
-
-## 7. Design-Referenzen (optional)
-
-Apps oder Websites, die ähnlich aussehen/funktionieren sollen?
-
-- ___
-- ___
-
-## 8. Sonstiges
-
-Besonderheiten, Einschränkungen, Wünsche?
-
-> ___
+- **Name:** Laser DXF-Maker
+- **Was macht die App in einem Satz?**
+  Ein Browser-Tool das rohe Kunden-DXF-Dateien einliest, bereinigt,
+  nach Schnitttypen klassifiziert (Außenkontur, Innenkontur, Biegung,
+  Gravur) und als saubere DXF-Datei für Laser-Schneidmaschinen exportiert.
 
 ---
 
-## 9. Uebergabe-Regel nach dem Ausfuellen
+## 2. Zielgruppen / Rollen
 
-- Brief fertigstellen.
-- `docs/workflow.md` kurz gegenlesen.
-- Danach den Requirements Engineer starten.
-- Keine Architektur, Tests oder Implementierungsdetails direkt hier festhalten, wenn sie spaeter in die kanonischen Dateien unter `docs/` gehoeren.
+| Rolle | Beschreibung | Beispiel-Aktionen |
+|---|---|---|
+| **Bediener** | Laserschneider der die App täglich nutzt | DXF hochladen, Konturen markieren, exportieren |
+| **Admin** | Verwaltet Kunden und Projekte | Kunden anlegen, Projekthistorie einsehen |
+| **Kunde** *(Phase 2)* | Liefert DXF-Dateien | DXF hochladen, Vorschau ansehen |
+
+---
+
+## 3. Kern-Features (MVP)
+
+1. **DXF Upload & Anzeige** — DXF-Datei hochladen, parsen, als SVG anzeigen
+2. **Elemente klassifizieren** — Per Klick einer Kategorie zuweisen
+3. **Bereinigung** — Nicht markierte löschen, Duplikate automatisch entfernen
+4. **Layer & Farben** — Automatisch nach Kategorie zuweisen
+5. **DXF Export** — Bereinigte DXF R12 Datei herunterladen
+
+---
+
+## 4. Nice-to-Have (nach MVP)
+
+- Kunden & Projektverwaltung mit Supabase
+- Projekthistorie pro Kunde
+- PDF-Vorschau für Kunden
+- Lasso-Selektion (mehrere Elemente gleichzeitig)
+- Undo / Redo
+
+---
+
+## 5. Tech-Stack
+
+| Entscheidung | Wahl | Begründung |
+|---|---|---|
+| **Framework** | Next.js 16, React 19 | Template-Standard |
+| **Styling** | Tailwind v4 + shadcn/ui | Template-Standard |
+| **SVG-Editor** | Wiederverwendet aus bestehendem Projekt | Fertige Architektur! |
+| **DXF-Parser** | Selbst geschrieben (R12 ASCII) | Volle Kontrolle |
+| **Datenbank** | Supabase *(Phase 2)* | Lokal zuerst |
+| **Auth** | Supabase Auth *(Phase 2)* | Passt zu Supabase |
+| **Hosting** | Vercel | Template-Standard |
+
+---
+
+## 6. Komplexität
+
+- [x] **Simple** — Lokal zuerst, kein Auth im MVP
+- [ ] Standard
+- [ ] Enterprise
+
+---
+
+## 7. Wiederverwendete Architektur ⭐
+
+> Wichtig für Solution Architect und Frontend Developer!
+> Lies: `docs/architecture/DXF_EDITOR_ARCHITECTURE_BRIEFING.md`
+
+### Was bereits fertig ist (aus bestehendem Projekt übernehmen):
+
+| Komponente | Datei | Was es macht |
+|---|---|---|
+| Datenmodell | `DxfEntityV2` Interface | Alle Entitätstypen mit Koordinaten |
+| SVG-Rendering | `EntityPath.tsx` | Entity → SVG `<path>` Konvertierung |
+| Viewport | `useEditorViewport` Hook | Zoom, Pan, Fit-to-View |
+| Editor-Shell | `DxfEditor.tsx` | SVG-Container, Pointer-Events |
+| Helper | `viewbox.ts`, `zoom.ts`, `pan.ts` | Pure Funktionen |
+
+### Was NEU gebaut werden muss:
+
+| Feature | Beschreibung |
+|---|---|
+| DXF R12 Parser | ASCII DXF einlesen → `DxfEntityV2[]` |
+| Klassifizierungs-UI | Buttons: Außenkontur / Innenkontur / Biegung / Gravur |
+| Layer-Logik | Markierte Elemente → Layer + Farbe |
+| Auto-Bereinigung | Nicht markierte löschen, Duplikate entfernen |
+| DXF R12 Exporter | `DxfEntityV2[]` → DXF R12 ASCII |
+| Kunden/Projekt-Form | Name, Projektnummer vor dem Start |
+| Lokaler Speicher | `localStorage` Phase 1, Supabase Phase 2 |
+
+---
+
+## 8. Unterstützte DXF-Entitäten
+
+**Format:** AutoCAD DXF R12 (ASCII)
+
+| Entität | Priorität | Hinweis |
+|---|---|---|
+| `LINE` | Pflicht | |
+| `CIRCLE` | Pflicht | |
+| `ARC` | Pflicht | CCW-Winkel → SVG beachten |
+| `POLYLINE` / `LWPOLYLINE` | Pflicht | Wichtigste Kontur-Entität |
+| `TEXT` | Pflicht | Gravuren |
+| `SPLINE` | Nice-to-have | In R12 als Polyline gespeichert |
+
+---
+
+## 9. Layer-System
+
+| Layer | Farbe | Hex | Zweck |
+|---|---|---|---|
+| `CUT_OUTER` | Rot | `#FF0000` | Außenkontur |
+| `CUT_INNER` | Blau | `#0000FF` | Innenkontur / Ausschnitte |
+| `BEND` | Gelb | `#FFFF00` | Biegelinien |
+| `ENGRAVE` | Grün | `#00CC00` | Gravuren / Text |
+
+---
+
+## 10. Kern-Workflow
+
+```
+1. Kunde & Projekt festlegen
+        ↓
+2. DXF-Datei hochladen
+        ↓
+3. DXF parsen → DxfEntityV2[]
+        ↓
+4. SVG anzeigen (wiederverwendeter Editor)
+        ↓
+5. Elemente markieren (Außenkontur / Innenkontur / Biegung / Gravur)
+        ↓
+6. Nicht markiertes löschen
+        ↓
+7. Auto-Bereinigung (Duplikate, Nulllinien)
+        ↓
+8. Layer + Farben automatisch zuweisen
+        ↓
+9. Vorschau der bereinigten Zeichnung
+        ↓
+10. DXF R12 exportieren & herunterladen
+        ↓
+11. Lokal speichern (Phase 1) → Supabase (Phase 2)
+```
+
+---
+
+## 11. Offene Fragen für Requirements Engineer
+
+- [ ] Wie viele Elemente hat eine typische Kunden-DXF?
+- [ ] Soll Lasso-Selektion im MVP dabei sein?
+- [ ] Welche Laser-Software liest die DXF? (LightBurn? RDWorks?)
+- [ ] Nur lokal oder im Internet erreichbar?
+- [ ] Braucht es Undo/Redo im MVP?
+
+---
+
+## 12. Erfolgskriterien
+
+- [ ] Echte Kunden-DXF kann hochgeladen und angezeigt werden
+- [ ] Alle Entitäten können markiert und klassifiziert werden
+- [ ] Exportierte DXF wird von LightBurn korrekt gelesen
+- [ ] Workflow dauert unter 5 Minuten pro Datei
