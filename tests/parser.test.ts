@@ -911,3 +911,86 @@ describe("parseDxf - SPLINE support", () => {
     expect(spline.coordinates.points![1].y).toBeCloseTo(70);
   });
 });
+
+// ---- ELLIPSE Tests ---------------------------------------------------
+
+describe("parseDxf - ELLIPSE support", () => {
+  it("parses an ELLIPSE entity", () => {
+    // DXF ELLIPSE: center (10,20), major axis endpoint (5,0) relative to center,
+    // minor ratio 0.6, full ellipse (0 to 2*PI)
+    const dxf = wrapEntities(
+      [
+        "0", "ELLIPSE",
+        "8", "0",
+        "10", "10",      // cx
+        "20", "20",      // cy
+        "11", "5",       // major axis endpoint X (relative)
+        "21", "0",       // major axis endpoint Y (relative)
+        "40", "0.6",     // minor/major ratio
+        "41", "0",       // start param (radians)
+        "42", String(2 * Math.PI), // end param (radians)
+      ].join("\n"),
+    );
+    const result = parseDxf(dxf);
+
+    expect(result.entities).toHaveLength(1);
+    const e = result.entities[0];
+    expect(e.type).toBe("ELLIPSE");
+    expect(e.coordinates.cx).toBe(10);
+    expect(e.coordinates.cy).toBe(20);
+    expect(e.coordinates.rx).toBe(5);      // major axis = sqrt(5²+0²)
+    expect(e.coordinates.ry).toBeCloseTo(3); // 5 * 0.6
+    expect(e.coordinates.rotation).toBe(0);  // atan2(0,5) = 0
+    expect(e.closed).toBe(true);
+    expect(e.length).toBeGreaterThan(0);
+  });
+
+  it("CIRCLE becomes ELLIPSE under non-uniform scaling", () => {
+    const block = makeBlock(
+      "CIRC_BLOCK",
+      ["0", "CIRCLE", "8", "0", "10", "0", "20", "0", "40", "10"].join("\n"),
+    );
+    const insert = makeInsert("CIRC_BLOCK", 0, 0, { scaleX: 2, scaleY: 1 });
+    const dxf = wrapWithBlocks(block, insert);
+    const result = parseDxf(dxf);
+
+    expect(result.entities).toHaveLength(1);
+    const e = result.entities[0];
+    expect(e.type).toBe("ELLIPSE");
+    expect(e.coordinates.rx).toBeCloseTo(20);  // 10 * |scaleX=2|
+    expect(e.coordinates.ry).toBeCloseTo(10);  // 10 * |scaleY=1|
+    expect(e.closed).toBe(true);
+  });
+
+  it("CIRCLE stays CIRCLE under uniform scaling", () => {
+    const block = makeBlock(
+      "CIRC_UNIFORM",
+      ["0", "CIRCLE", "8", "0", "10", "0", "20", "0", "40", "10"].join("\n"),
+    );
+    const insert = makeInsert("CIRC_UNIFORM", 0, 0, { scaleX: 3, scaleY: 3 });
+    const dxf = wrapWithBlocks(block, insert);
+    const result = parseDxf(dxf);
+
+    expect(result.entities).toHaveLength(1);
+    const e = result.entities[0];
+    expect(e.type).toBe("CIRCLE");
+    expect(e.coordinates.r).toBeCloseTo(30); // 10 * 3
+  });
+
+  it("ARC becomes ELLIPSE under non-uniform scaling", () => {
+    const block = makeBlock(
+      "ARC_BLOCK",
+      ["0", "ARC", "8", "0", "10", "0", "20", "0", "40", "10", "50", "0", "51", "90"].join("\n"),
+    );
+    const insert = makeInsert("ARC_BLOCK", 0, 0, { scaleX: 2, scaleY: 1 });
+    const dxf = wrapWithBlocks(block, insert);
+    const result = parseDxf(dxf);
+
+    expect(result.entities).toHaveLength(1);
+    const e = result.entities[0];
+    expect(e.type).toBe("ELLIPSE");
+    expect(e.coordinates.rx).toBeCloseTo(20);
+    expect(e.coordinates.ry).toBeCloseTo(10);
+    expect(e.closed).toBeFalsy(); // Arc, not full ellipse
+  });
+});

@@ -25,6 +25,7 @@ export type DxfEntityType =
   | "LINE"
   | "ARC"
   | "CIRCLE"
+  | "ELLIPSE"
   | "LWPOLYLINE"
   | "SPLINE"
   | "TEXT"
@@ -83,14 +84,21 @@ export interface EntityCoordinates {
   x2?: number;
   y2?: number;
 
-  /** CIRCLE, ARC: Center point */
+  /** CIRCLE, ARC, ELLIPSE: Center point */
   cx?: number;
   cy?: number;
 
   /** CIRCLE, ARC: Radius */
   r?: number;
 
-  /** ARC: Angles in degrees */
+  /** ELLIPSE: Semi-major axis length */
+  rx?: number;
+  /** ELLIPSE: Semi-minor axis length */
+  ry?: number;
+  /** ELLIPSE: Rotation angle of major axis in degrees */
+  rotation?: number;
+
+  /** ARC, ELLIPSE: Angles in degrees */
   startAngle?: number;
   endAngle?: number;
 

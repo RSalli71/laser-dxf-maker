@@ -489,12 +489,26 @@ function areGeometricallyEqual(a: DxfEntityV2, b: DxfEntityV2): boolean {
         nearEqual(a.coordinates.endAngle, b.coordinates.endAngle)
       );
 
+    case "ELLIPSE":
+      return (
+        nearEqual(a.coordinates.cx, b.coordinates.cx) &&
+        nearEqual(a.coordinates.cy, b.coordinates.cy) &&
+        nearEqual(a.coordinates.rx, b.coordinates.rx) &&
+        nearEqual(a.coordinates.ry, b.coordinates.ry) &&
+        nearEqual(a.coordinates.rotation, b.coordinates.rotation) &&
+        nearEqual(a.coordinates.startAngle, b.coordinates.startAngle) &&
+        nearEqual(a.coordinates.endAngle, b.coordinates.endAngle)
+      );
+
     case "LWPOLYLINE": {
       const ptsA = a.coordinates.points ?? [];
       const ptsB = b.coordinates.points ?? [];
       if (ptsA.length !== ptsB.length) return false;
       return ptsA.every(
-        (p, i) => nearEqual(p.x, ptsB[i].x) && nearEqual(p.y, ptsB[i].y),
+        (p, i) =>
+          nearEqual(p.x, ptsB[i].x) &&
+          nearEqual(p.y, ptsB[i].y) &&
+          nearEqual(p.bulge ?? 0, ptsB[i].bulge ?? 0),
       );
     }
 

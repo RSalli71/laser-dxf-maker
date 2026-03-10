@@ -201,6 +201,51 @@ describe("cleanEntities", () => {
     expect(cleaned).toHaveLength(2);
   });
 
+  // Bulge-Unterscheidung bei LWPOLYLINE-Duplikaten
+  it("keeps LWPOLYLINE with different bulge as non-duplicate", () => {
+    const entities: DxfEntityV2[] = [
+      makeEntity({
+        id: 0,
+        type: "LWPOLYLINE",
+        coordinates: { points: [{ x: 0, y: 0 }, { x: 10, y: 0 }] },
+        length: 10,
+      }),
+      makeEntity({
+        id: 1,
+        type: "LWPOLYLINE",
+        coordinates: { points: [{ x: 0, y: 0, bulge: 1 }, { x: 10, y: 0 }] },
+        length: 15.708,
+      }),
+    ];
+
+    const { cleaned } = cleanEntities(entities);
+
+    // Same points but different bulge → NOT duplicates
+    expect(cleaned).toHaveLength(2);
+  });
+
+  it("removes LWPOLYLINE duplicate with same bulge", () => {
+    const entities: DxfEntityV2[] = [
+      makeEntity({
+        id: 0,
+        type: "LWPOLYLINE",
+        coordinates: { points: [{ x: 0, y: 0, bulge: 1 }, { x: 10, y: 0 }] },
+        length: 15.708,
+      }),
+      makeEntity({
+        id: 1,
+        type: "LWPOLYLINE",
+        coordinates: { points: [{ x: 0, y: 0, bulge: 1 }, { x: 10, y: 0 }] },
+        length: 15.708,
+      }),
+    ];
+
+    const { cleaned, report } = cleanEntities(entities);
+
+    expect(cleaned).toHaveLength(1);
+    expect(report.removedDuplicates).toBe(1);
+  });
+
   // F4 AC: Nulllinien werden entfernt
   it("removes zero-length lines (start === end)", () => {
     const entities: DxfEntityV2[] = [

@@ -155,6 +155,8 @@ function entityToSvgPath(entity: DxfEntityV2): string | null {
       return arcToPath(c);
     case "CIRCLE":
       return circleToPath(c);
+    case "ELLIPSE":
+      return ellipseToPath(c, entity.closed);
     case "LWPOLYLINE":
     case "SPLINE":
       return polylineToPath(c, entity.closed);
@@ -216,6 +218,43 @@ function circleToPath(c: DxfEntityV2["coordinates"]): string | null {
     `A${r},${r} 0 1,0 ${c.cx - r},${c.cy}`,
     "Z",
   ].join(" ");
+}
+
+function ellipseToPath(
+  c: DxfEntityV2["coordinates"],
+  closed?: boolean,
+): string | null {
+  if (c.cx === undefined || c.cy === undefined || c.rx === undefined || c.ry === undefined) {
+    return null;
+  }
+
+  const { cx, cy, rx, ry, rotation = 0 } = c;
+
+  if (closed || (c.startAngle === undefined && c.endAngle === undefined)) {
+    // Volle Ellipse als zwei Halbboegen
+    // SVG-Arc mit rotation fuer gedrehte Ellipsen
+    return [
+      `M${cx - rx},${cy}`,
+      `A${rx},${ry} ${rotation} 1,0 ${cx + rx},${cy}`,
+      `A${rx},${ry} ${rotation} 1,0 ${cx - rx},${cy}`,
+      "Z",
+    ].join(" ");
+  }
+
+  // Elliptischer Bogen
+  const startRad = ((c.startAngle ?? 0) * Math.PI) / 180;
+  let endRad = ((c.endAngle ?? 360) * Math.PI) / 180;
+  if (endRad <= startRad) endRad += 2 * Math.PI;
+
+  const x1 = cx + rx * Math.cos(startRad);
+  const y1 = cy + ry * Math.sin(startRad);
+  const x2 = cx + rx * Math.cos(endRad);
+  const y2 = cy + ry * Math.sin(endRad);
+
+  const largeArc = endRad - startRad > Math.PI ? 1 : 0;
+  const sweep = 1; // CCW in DXF → sweep=1 wegen scale(1,-1)
+
+  return `M${x1},${y1} A${rx},${ry} ${rotation} ${largeArc},${sweep} ${x2},${y2}`;
 }
 
 /**

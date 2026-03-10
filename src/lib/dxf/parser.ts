@@ -493,17 +493,23 @@ function transformResolvedEntity(
     case "CIRCLE": {
       const { cx = 0, cy = 0, r = 0 } = entity.coordinates;
       const center = transformPoint(
-        cx,
-        cy,
-        insertX,
-        insertY,
-        scaleX,
-        scaleY,
-        rotationRad,
-        baseX,
-        baseY,
+        cx, cy, insertX, insertY, scaleX, scaleY, rotationRad, baseX, baseY,
       );
-      const scaledR = r * Math.abs((scaleX + scaleY) / 2);
+      const absScaleX = Math.abs(scaleX);
+      const absScaleY = Math.abs(scaleY);
+      // Nicht-uniforme Skalierung → ELLIPSE
+      if (Math.abs(absScaleX - absScaleY) > 1e-6) {
+        const rx = r * absScaleX;
+        const ry = r * absScaleY;
+        return {
+          ...entity,
+          type: "ELLIPSE",
+          coordinates: { cx: center.x, cy: center.y, rx, ry, rotation: rotationDeg },
+          length: approximateEllipsePerimeter(rx, ry),
+          closed: true,
+        };
+      }
+      const scaledR = r * absScaleX;
       return {
         ...entity,
         coordinates: { cx: center.x, cy: center.y, r: scaledR },
@@ -514,36 +520,64 @@ function transformResolvedEntity(
 
     case "ARC": {
       const {
-        cx = 0,
-        cy = 0,
-        r = 0,
-        startAngle = 0,
-        endAngle = 360,
+        cx = 0, cy = 0, r = 0, startAngle = 0, endAngle = 360,
       } = entity.coordinates;
       const center = transformPoint(
-        cx,
-        cy,
-        insertX,
-        insertY,
-        scaleX,
-        scaleY,
-        rotationRad,
-        baseX,
-        baseY,
+        cx, cy, insertX, insertY, scaleX, scaleY, rotationRad, baseX, baseY,
       );
-      const scaledR = r * Math.abs((scaleX + scaleY) / 2);
+      const absScaleX = Math.abs(scaleX);
+      const absScaleY = Math.abs(scaleY);
       const newStart = transformAngle(startAngle, scaleX, scaleY, rotationDeg);
       const newEnd = transformAngle(endAngle, scaleX, scaleY, rotationDeg);
+      // Nicht-uniforme Skalierung → ELLIPSE (elliptischer Bogen)
+      if (Math.abs(absScaleX - absScaleY) > 1e-6) {
+        const rx = r * absScaleX;
+        const ry = r * absScaleY;
+        const angleFraction = calculateArcAngleFraction(newStart, newEnd);
+        return {
+          ...entity,
+          type: "ELLIPSE",
+          coordinates: {
+            cx: center.x, cy: center.y, rx, ry,
+            rotation: rotationDeg, startAngle: newStart, endAngle: newEnd,
+          },
+          length: approximateEllipsePerimeter(rx, ry) * angleFraction,
+        };
+      }
+      const scaledR = r * absScaleX;
       return {
         ...entity,
         coordinates: {
-          cx: center.x,
-          cy: center.y,
-          r: scaledR,
-          startAngle: newStart,
-          endAngle: newEnd,
+          cx: center.x, cy: center.y, r: scaledR,
+          startAngle: newStart, endAngle: newEnd,
         },
         length: calculateArcLength(scaledR, newStart, newEnd),
+      };
+    }
+
+    case "ELLIPSE": {
+      const {
+        cx = 0, cy = 0, rx = 0, ry = 0,
+        rotation: rot = 0, startAngle = 0, endAngle = 360,
+      } = entity.coordinates;
+      const center = transformPoint(
+        cx, cy, insertX, insertY, scaleX, scaleY, rotationRad, baseX, baseY,
+      );
+      const newRx = rx * Math.abs(scaleX);
+      const newRy = ry * Math.abs(scaleY);
+      const newRot = rot + rotationDeg;
+      const isFullEllipse = Math.abs(endAngle - startAngle) >= 359.99;
+      const length = isFullEllipse
+        ? approximateEllipsePerimeter(newRx, newRy)
+        : approximateEllipsePerimeter(newRx, newRy) * calculateArcAngleFraction(startAngle, endAngle);
+      return {
+        ...entity,
+        coordinates: {
+          cx: center.x, cy: center.y, rx: newRx, ry: newRy,
+          rotation: newRot, startAngle, endAngle,
+        },
+        length,
+        closed: isFullEllipse,
       };
     }
 
@@ -840,30 +874,25 @@ function resolveBlockEntity(
       const cy = getFloatValue(pairs, 20) ?? 0;
       const r = getFloatValue(pairs, 40) ?? 0;
       const center = transformPoint(
-        cx,
-        cy,
-        insertX,
-        insertY,
-        scaleX,
-        scaleY,
-        rotationRad,
-        baseX,
-        baseY,
+        cx, cy, insertX, insertY, scaleX, scaleY, rotationRad, baseX, baseY,
       );
-      // Scale radius (use average of scaleX/scaleY for non-uniform)
-      const scaledR = r * Math.abs((scaleX + scaleY) / 2);
-      return [
-        {
-          id,
-          type: "CIRCLE",
-          layer,
-          color,
-          linetype,
-          coordinates: { cx: center.x, cy: center.y, r: scaledR },
-          length: 2 * Math.PI * scaledR,
-          closed: true,
-        },
-      ];
+      const absScaleX = Math.abs(scaleX);
+      const absScaleY = Math.abs(scaleY);
+      if (Math.abs(absScaleX - absScaleY) > 1e-6) {
+        const rx = r * absScaleX;
+        const ry = r * absScaleY;
+        return [{
+          id, type: "ELLIPSE", layer, color, linetype,
+          coordinates: { cx: center.x, cy: center.y, rx, ry, rotation: rotationDeg },
+          length: approximateEllipsePerimeter(rx, ry), closed: true,
+        }];
+      }
+      const scaledR = r * absScaleX;
+      return [{
+        id, type: "CIRCLE", layer, color, linetype,
+        coordinates: { cx: center.x, cy: center.y, r: scaledR },
+        length: 2 * Math.PI * scaledR, closed: true,
+      }];
     }
 
     case "ARC": {
@@ -873,36 +902,66 @@ function resolveBlockEntity(
       const startAngle = getFloatValue(pairs, 50) ?? 0;
       const endAngle = getFloatValue(pairs, 51) ?? 360;
       const center = transformPoint(
-        cx,
-        cy,
-        insertX,
-        insertY,
-        scaleX,
-        scaleY,
-        rotationRad,
-        baseX,
-        baseY,
+        cx, cy, insertX, insertY, scaleX, scaleY, rotationRad, baseX, baseY,
       );
-      const scaledR = r * Math.abs((scaleX + scaleY) / 2);
+      const absScaleX = Math.abs(scaleX);
+      const absScaleY = Math.abs(scaleY);
       const newStart = transformAngle(startAngle, scaleX, scaleY, rotationDeg);
       const newEnd = transformAngle(endAngle, scaleX, scaleY, rotationDeg);
-      return [
-        {
-          id,
-          type: "ARC",
-          layer,
-          color,
-          linetype,
+      if (Math.abs(absScaleX - absScaleY) > 1e-6) {
+        const rx = r * absScaleX;
+        const ry = r * absScaleY;
+        const angleFraction = calculateArcAngleFraction(newStart, newEnd);
+        return [{
+          id, type: "ELLIPSE", layer, color, linetype,
           coordinates: {
-            cx: center.x,
-            cy: center.y,
-            r: scaledR,
-            startAngle: newStart,
-            endAngle: newEnd,
+            cx: center.x, cy: center.y, rx, ry,
+            rotation: rotationDeg, startAngle: newStart, endAngle: newEnd,
           },
-          length: calculateArcLength(scaledR, newStart, newEnd),
+          length: approximateEllipsePerimeter(rx, ry) * angleFraction,
+        }];
+      }
+      const scaledR = r * absScaleX;
+      return [{
+        id, type: "ARC", layer, color, linetype,
+        coordinates: {
+          cx: center.x, cy: center.y, r: scaledR,
+          startAngle: newStart, endAngle: newEnd,
         },
-      ];
+        length: calculateArcLength(scaledR, newStart, newEnd),
+      }];
+    }
+
+    case "ELLIPSE": {
+      const cx = getFloatValue(pairs, 10) ?? 0;
+      const cy = getFloatValue(pairs, 20) ?? 0;
+      const majorEndX = getFloatValue(pairs, 11) ?? 1;
+      const majorEndY = getFloatValue(pairs, 21) ?? 0;
+      const minorRatio = getFloatValue(pairs, 40) ?? 1;
+      const startParam = getFloatValue(pairs, 41) ?? 0;
+      const endParam = getFloatValue(pairs, 42) ?? (2 * Math.PI);
+      const center = transformPoint(
+        cx, cy, insertX, insertY, scaleX, scaleY, rotationRad, baseX, baseY,
+      );
+      const baseMajor = Math.sqrt(majorEndX ** 2 + majorEndY ** 2);
+      const baseRot = (Math.atan2(majorEndY, majorEndX) * 180) / Math.PI;
+      const rx = baseMajor * Math.abs(scaleX);
+      const ry = baseMajor * minorRatio * Math.abs(scaleY);
+      const rotation = baseRot + rotationDeg;
+      const startAngle = (startParam * 180) / Math.PI;
+      const endAngle = (endParam * 180) / Math.PI;
+      const isFullEllipse = Math.abs(endParam - startParam) >= (2 * Math.PI - 0.001);
+      const length = isFullEllipse
+        ? approximateEllipsePerimeter(rx, ry)
+        : approximateEllipsePerimeter(rx, ry) * calculateArcAngleFraction(startAngle, endAngle);
+      return [{
+        id, type: "ELLIPSE", layer, color, linetype,
+        coordinates: {
+          cx: center.x, cy: center.y, rx, ry,
+          rotation, startAngle, endAngle,
+        },
+        length, closed: isFullEllipse,
+      }];
     }
 
     case "LWPOLYLINE": {
@@ -1068,6 +1127,7 @@ const SUPPORTED_TYPES = new Set<string>([
   "LINE",
   "CIRCLE",
   "ARC",
+  "ELLIPSE",
   "LWPOLYLINE",
   "SPLINE",
   "TEXT",
@@ -1261,6 +1321,32 @@ function parseEntity(
       const endAngle = getFloatValue(pairs, 51) ?? 360;
       coordinates = { cx, cy, r, startAngle, endAngle };
       length = calculateArcLength(r, startAngle, endAngle);
+      break;
+    }
+
+    case "ELLIPSE": {
+      type = "ELLIPSE";
+      const cx = getFloatValue(pairs, 10) ?? 0;
+      const cy = getFloatValue(pairs, 20) ?? 0;
+      // DXF ELLIPSE: Code 11/21 = endpoint of major axis relative to center
+      const majorEndX = getFloatValue(pairs, 11) ?? 1;
+      const majorEndY = getFloatValue(pairs, 21) ?? 0;
+      const minorRatio = getFloatValue(pairs, 40) ?? 1; // ratio minor/major
+      const startParam = getFloatValue(pairs, 41) ?? 0;    // radians
+      const endParam = getFloatValue(pairs, 42) ?? (2 * Math.PI); // radians
+
+      const rx = Math.sqrt(majorEndX ** 2 + majorEndY ** 2);
+      const ry = rx * minorRatio;
+      const rotation = (Math.atan2(majorEndY, majorEndX) * 180) / Math.PI;
+      const startAngle = (startParam * 180) / Math.PI;
+      const endAngle = (endParam * 180) / Math.PI;
+
+      const isFullEllipse = Math.abs(endParam - startParam) >= (2 * Math.PI - 0.001);
+      coordinates = { cx, cy, rx, ry, rotation, startAngle, endAngle };
+      length = isFullEllipse
+        ? approximateEllipsePerimeter(rx, ry)
+        : approximateEllipsePerimeter(rx, ry) * calculateArcAngleFraction(startAngle, endAngle);
+      closed = isFullEllipse;
       break;
     }
 
@@ -1555,6 +1641,27 @@ function calculatePolylineLength(
     length += Math.sqrt(dx * dx + dy * dy);
   }
   return length;
+}
+
+/**
+ * Ramanujan-Naeherung fuer den Ellipsenumfang.
+ * Fehler < 0.01% fuer alle Achsverhaeltnisse.
+ */
+function approximateEllipsePerimeter(rx: number, ry: number): number {
+  const a = Math.max(rx, ry);
+  const b = Math.min(rx, ry);
+  if (a < 1e-10) return 0;
+  const h = ((a - b) * (a - b)) / ((a + b) * (a + b));
+  return Math.PI * (a + b) * (1 + (3 * h) / (10 + Math.sqrt(4 - 3 * h)));
+}
+
+/**
+ * Berechnet den Winkelanteil eines Bogens als Bruchteil von 360°.
+ */
+function calculateArcAngleFraction(startDeg: number, endDeg: number): number {
+  let diff = endDeg - startDeg;
+  if (diff <= 0) diff += 360;
+  return diff / 360;
 }
 
 /**
