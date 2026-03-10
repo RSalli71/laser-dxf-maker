@@ -167,6 +167,48 @@ Create an entry when the decision has **long-term impact**, e.g.:
 
 ---
 
+### 2026-03-10 — F3 Selection: Entfernung der automatischen Cluster-Expansion
+- **Status:** Accepted
+- **Context:**
+  - F3 (Teile definieren) verwendet `expandSelectionToPartCluster()` nach Klick und Box-Selektion, um automatisch benachbarte Entities und innenliegende Geometrie mitzunehmen.
+  - Bei Zeichnungen mit Rahmen, Schriftfeldern oder grossen umschliessenden Konturen fuehrt dies dazu, dass ein einzelner Klick die gesamte Zeichnung mitreisst ("Rahmen-Eskalationsproblem").
+  - Der Bediener kann nicht vorhersagen, was das System nach seiner Auswahl tun wird.
+- **Decision:**
+  - `expandSelectionToPartCluster()` wird im Select-Modus (F3) nicht mehr aufgerufen.
+  - Einzelklick liefert genau eine Entity-ID. Box-Selektion liefert nur intersectende Entities.
+  - Die Funktion wird als `@deprecated` markiert und im Code belassen fuer moegliche spaetere Verwendung als optionaler Expertenmodus.
+  - Abwahl erfolgt per Toggle-Klick (erneuter Klick auf selektierte Entity).
+- **Alternatives:**
+  - A) Richtung A: Kontur-/Komponentenbasierte Selektion (aufwaendig, spaetere Phase)
+  - B) Toleranz/Schwellwert von `expandSelectionToPartCluster` anpassen (behebt das Grundproblem nicht)
+  - C) Funktion komplett loeschen (verhindert spaetere Wiederverwendung)
+- **Consequences:**
+  - **Positive:** Vorhersagbares Verhalten, kein Rahmen-Eskalationsproblem, einfacherer Code, bessere Performance (O(n^2) Expansion entfaellt).
+  - **Negative:** Bediener muss alle Entities manuell markieren (mehr Klicks bei komplexen Teilen). Wird durch Box-Selektion gemildert.
+- **Related:** `docs/requirements/F3_SELECTION_REQUIREMENTS.md`, `docs/architecture/F3_SELECTION_ARCHITECTURE.md`
+
+---
+
+### 2026-03-10 — F3 Abwahl: Toggle via erneuten Klick statt Modifier-Taste
+- **Status:** Accepted
+- **Context:**
+  - F3 braucht eine Moeglichkeit, einzelne Entities aus der Auswahl zu entfernen.
+  - Optionen: Toggle (erneuter Klick), Ctrl+Klick, dedizierter Abwahl-Button.
+- **Decision:**
+  - Toggle: Ein Klick auf eine bereits selektierte Entity waehlt sie ab.
+  - Box-Selektion ist immer additiv (kein Toggle bei Fensterauswahl).
+  - Klick ins Leere leert nur die lokale visuelle Auswahl, nicht die Part-Zuordnung.
+- **Alternatives:**
+  - A) Ctrl+Klick: Erfordert Modifier-Wissen, plattformabhaengig (Cmd auf Mac)
+  - B) Dedizierter Abwahl-Button: Zusaetzliche UI-Komplexitaet
+  - C) Rechtsklick-Kontextmenu: Over-Engineering
+- **Consequences:**
+  - **Positive:** Intuitivster Mechanismus, kein Vorwissen noetig, konsistent mit additivem Klick-Modell.
+  - **Negative:** Keine Moeglichkeit per Box mehrere Entities abzuwaehlen (nur einzeln per Klick). Akzeptabel fuer den Use Case.
+- **Related:** `docs/architecture/F3_SELECTION_ARCHITECTURE.md` (Abschnitt 5)
+
+---
+
 ## Best Practices
 - **Scope:** Focus on decisions with long-term impact.
 - **Clarity:** Use bullet points; add short snippets if they clarify.

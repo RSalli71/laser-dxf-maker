@@ -21,6 +21,7 @@ import type { ClassificationType } from "@/types/classification";
 import { viewBoxToString } from "@/lib/editor/viewbox";
 import { getSnapTolerance } from "@/lib/editor/snap-tolerance";
 import { hitTestEntity } from "@/lib/editor/hit-test";
+import { doesEntityIntersectRect } from "@/lib/editor/entity-selection";
 import { useEditorViewport } from "@/hooks/use-editor-viewport";
 import { EntityPath } from "./EntityPath";
 
@@ -32,14 +33,14 @@ interface DxfEditorProps {
   entities: DxfEntityV2[];
   /** Current editor mode */
   mode: EditorMode;
-  /** Active part ID (F3: which part is being defined) */
-  activePartId?: string | null;
   /** Active classification (F5: which category is being assigned) */
   activeClassification?: ClassificationType | null;
   /** Called when entities are selected via box or click */
   onEntitiesSelected?: (entityIds: number[]) => void;
   /** Called when a single entity is clicked */
   onEntityClicked?: (entityId: number) => void;
+  /** Gerufen wenn eine einzelne Entity abgewaehlt wird (Toggle-Klick im Select-Modus) */
+  onEntityDeselected?: (entityId: number) => void;
 }
 
 /** Selection rectangle in world coordinates */
@@ -114,80 +115,6 @@ function computeBoundingBox(entities: DxfEntityV2[]): BoundingBoxV2 {
   };
 }
 
-/**
- * Get entity bounding box for box selection hit testing.
- */
-function getEntityBBox(entity: DxfEntityV2): {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-} | null {
-  const c = entity.coordinates;
-
-  if (entity.type === "LINE") {
-    if (c.x1 === undefined || c.y1 === undefined || c.x2 === undefined || c.y2 === undefined) return null;
-    return {
-      minX: Math.min(c.x1, c.x2),
-      minY: Math.min(c.y1, c.y2),
-      maxX: Math.max(c.x1, c.x2),
-      maxY: Math.max(c.y1, c.y2),
-    };
-  }
-
-  if (entity.type === "CIRCLE" || entity.type === "ARC") {
-    if (c.cx === undefined || c.cy === undefined || c.r === undefined) return null;
-    return {
-      minX: c.cx - c.r,
-      minY: c.cy - c.r,
-      maxX: c.cx + c.r,
-      maxY: c.cy + c.r,
-    };
-  }
-
-  if (entity.type === "LWPOLYLINE" && c.points && c.points.length > 0) {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    for (const p of c.points) {
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x);
-      maxY = Math.max(maxY, p.y);
-    }
-    return { minX, minY, maxX, maxY };
-  }
-
-  if (entity.type === "TEXT" && c.x !== undefined && c.y !== undefined) {
-    const h = c.height ?? 1;
-    const w = (c.text?.length ?? 1) * h * 0.6;
-    return { minX: c.x, minY: c.y - h, maxX: c.x + w, maxY: c.y };
-  }
-
-  return null;
-}
-
-/**
- * Check if an entity's bounding box is fully contained within a selection rectangle.
- */
-function isEntityInRect(
-  entity: DxfEntityV2,
-  rect: SelectionRect,
-): boolean {
-  const bbox = getEntityBBox(entity);
-  if (!bbox) return false;
-
-  const selMinX = Math.min(rect.startX, rect.endX);
-  const selMaxX = Math.max(rect.startX, rect.endX);
-  const selMinY = Math.min(rect.startY, rect.endY);
-  const selMaxY = Math.max(rect.startY, rect.endY);
-
-  return (
-    bbox.minX >= selMinX &&
-    bbox.maxX <= selMaxX &&
-    bbox.minY >= selMinY &&
-    bbox.maxY <= selMaxY
-  );
-}
-
 /** Classification color for selection rectangle */
 const CLASSIFICATION_RECT_COLORS: Record<ClassificationType, string> = {
   CUT_OUTER: "rgba(255, 0, 0, 0.15)",
@@ -206,10 +133,10 @@ const CLASSIFICATION_STROKE_COLORS: Record<ClassificationType, string> = {
 export function DxfEditor({
   entities,
   mode,
-  activePartId,
   activeClassification,
   onEntitiesSelected,
   onEntityClicked,
+  onEntityDeselected,
 }: DxfEditorProps) {
   // Bounding box from entities
   const boundingBox = useMemo(() => computeBoundingBox(entities), [entities]);
@@ -228,9 +155,13 @@ export function DxfEditor({
   } = useEditorViewport(boundingBox);
 
   // ---- Interaction state ----
-  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(null);
+  const [selectionRect, setSelectionRect] = useState<SelectionRect | null>(
+    null,
+  );
   const [hoveredEntityId, setHoveredEntityId] = useState<number | null>(null);
-  const [selectedEntityIds, setSelectedEntityIds] = useState<Set<number>>(new Set());
+  const [selectedEntityIds, setSelectedEntityIds] = useState<Set<number>>(
+    new Set(),
+  );
 
   const isPanning = useRef(false);
   const isDragging = useRef(false);
@@ -303,7 +234,10 @@ export function DxfEditor({
       if (!isPanning.current && !isDragging.current) {
         const world = clientToWorld(e.clientX, e.clientY);
         if (world) {
-          const tolerance = getSnapTolerance(viewBoxRef.current, containerSize.width);
+          const tolerance = getSnapTolerance(
+            viewBoxRef.current,
+            containerSize.width,
+          );
           const hit = hitTestEntity(world.x, world.y, entities, tolerance);
           setHoveredEntityId(hit?.id ?? null);
         }
@@ -330,14 +264,27 @@ export function DxfEditor({
         // Find all entities within the selection rectangle
         const selectedIds: number[] = [];
         for (const entity of entities) {
-          if (isEntityInRect(entity, selectionRect)) {
+          if (doesEntityIntersectRect(entity, selectionRect)) {
             selectedIds.push(entity.id);
           }
         }
 
         if (selectedIds.length > 0) {
-          onEntitiesSelected?.(selectedIds);
-          setSelectedEntityIds(new Set(selectedIds));
+          if (mode === "select") {
+            // Additiv: neue IDs zur bestehenden lokalen Auswahl hinzufuegen
+            setSelectedEntityIds((prev) => {
+              const next = new Set(prev);
+              for (const id of selectedIds) {
+                next.add(id);
+              }
+              return next;
+            });
+            onEntitiesSelected?.(selectedIds);
+          } else {
+            // Classify-Modus: unveraendert
+            onEntitiesSelected?.(selectedIds);
+            setSelectedEntityIds(new Set(selectedIds));
+          }
         }
 
         setSelectionRect(null);
@@ -350,13 +297,33 @@ export function DxfEditor({
       if (!isDragging.current && dragStart.current) {
         const world = clientToWorld(e.clientX, e.clientY);
         if (world) {
-          const tolerance = getSnapTolerance(viewBoxRef.current, containerSize.width);
+          const tolerance = getSnapTolerance(
+            viewBoxRef.current,
+            containerSize.width,
+          );
           const hit = hitTestEntity(world.x, world.y, entities, tolerance);
           if (hit) {
-            onEntityClicked?.(hit.id);
-            setSelectedEntityIds(new Set([hit.id]));
+            if (mode === "select") {
+              // Toggle: wenn bereits in lokaler Auswahl, abwaehlen
+              const isCurrentlySelected = selectedEntityIds.has(hit.id);
+              if (isCurrentlySelected) {
+                setSelectedEntityIds((prev) => {
+                  const next = new Set(prev);
+                  next.delete(hit.id);
+                  return next;
+                });
+                onEntityDeselected?.(hit.id);
+              } else {
+                setSelectedEntityIds((prev) => new Set(prev).add(hit.id));
+                onEntitiesSelected?.([hit.id]);
+              }
+            } else {
+              // Classify-Modus: unveraendert
+              onEntityClicked?.(hit.id);
+              setSelectedEntityIds(new Set([hit.id]));
+            }
           } else {
-            // Click on empty space: deselect
+            // Klick ins Leere: lokale Auswahl leeren (NICHT die Part-Zuordnung)
             setSelectedEntityIds(new Set());
           }
         }
@@ -368,12 +335,15 @@ export function DxfEditor({
     [
       selectionRect,
       entities,
+      mode,
+      selectedEntityIds,
       clientToWorld,
       containerSize.width,
       viewBoxRef,
       setViewBox,
       onEntitiesSelected,
       onEntityClicked,
+      onEntityDeselected,
     ],
   );
 
@@ -421,7 +391,7 @@ export function DxfEditor({
       {/* Fit-to-View button */}
       <button
         onClick={handleFitToView}
-        className="absolute right-3 top-3 z-10 rounded bg-white/90 px-2 py-1 text-xs font-medium text-gray-700 shadow-sm ring-1 ring-gray-200 hover:bg-white"
+        className="absolute top-3 right-3 z-10 rounded bg-white/90 px-2 py-1 text-xs font-medium text-gray-700 shadow-sm ring-1 ring-gray-200 hover:bg-white"
         type="button"
       >
         Fit

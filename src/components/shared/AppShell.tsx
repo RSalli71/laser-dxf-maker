@@ -13,13 +13,22 @@
 
 import { useCallback, useMemo, useState } from "react";
 import type { WorkflowStep } from "@/types/workflow";
-import type { DxfEntityV2, ParseStats as ParseStatsType, CleanReport as CleanReportType } from "@/types/dxf-v2";
+import type {
+  DxfEntityV2,
+  ParseStats as ParseStatsType,
+  CleanReport as CleanReportType,
+} from "@/types/dxf-v2";
 import type { ProjectInfo, PartDefinition } from "@/types/project";
 import type { ClassificationType } from "@/types/classification";
 
-import { cleanEntities } from "@/lib/dxf/cleaner";
-import { classifyEntities } from "@/lib/dxf/classifier";
 import { generateExportFilename } from "@/lib/dxf/exporter";
+import {
+  assignEntitiesToPart,
+  classifyAssignedParts,
+  cleanAssignedParts,
+  getAssignedPartEntities,
+  getPopulatedParts,
+} from "@/lib/workflow/part-workflow";
 import { getLayerConfig } from "@/types/classification";
 
 import { StepIndicator } from "./StepIndicator";
@@ -58,8 +67,11 @@ export function AppShell() {
   const [parseStats, setParseStats] = useState<ParseStatsType | null>(null);
   const [parts, setParts] = useState<PartDefinition[]>([]);
   const [activePart, setActivePart] = useState<string | null>(null);
-  const [cleanReports, setCleanReports] = useState<Map<string, CleanReportType>>(new Map());
-  const [activeClassification, setActiveClassification] = useState<ClassificationType>("CUT_OUTER");
+  const [cleanReports, setCleanReports] = useState<
+    Map<string, CleanReportType>
+  >(new Map());
+  const [activeClassification, setActiveClassification] =
+    useState<ClassificationType>("CUT_OUTER");
   const [fileName, setFileName] = useState("");
 
   // ---- Derived State ----
@@ -86,6 +98,27 @@ export function AppShell() {
 
   const canGoBack = currentStepIndex > 0;
 
+  const populatedParts = useMemo(() => getPopulatedParts(parts), [parts]);
+
+  const displayedPartId = useMemo(() => {
+    if (activePart && populatedParts.some((part) => part.id === activePart)) {
+      return activePart;
+    }
+
+    return populatedParts[0]?.id ?? null;
+  }, [activePart, populatedParts]);
+
+  const displayedPart = useMemo(
+    () => populatedParts.find((part) => part.id === displayedPartId) ?? null,
+    [displayedPartId, populatedParts],
+  );
+
+  const displayedPartEntities = useMemo(() => {
+    if (!displayedPart) return entities;
+    const entityIds = new Set(displayedPart.entityIds);
+    return entities.filter((entity) => entityIds.has(entity.id));
+  }, [displayedPart, entities]);
+
   // ---- Navigation ----
   const goNext = useCallback(() => {
     const nextIndex = currentStepIndex + 1;
@@ -94,42 +127,21 @@ export function AppShell() {
 
       // F4 auto-cleaning: when entering "clean" step, trigger cleaning
       if (nextStep === "clean") {
-        const newReports = new Map<string, CleanReportType>();
-        let allCleaned = [...entities];
+        const populatedParts = getPopulatedParts(parts);
+        const assignedEntities = getAssignedPartEntities(
+          entities,
+          populatedParts,
+        );
+        const cleaned = cleanAssignedParts(assignedEntities, populatedParts);
 
-        for (const part of parts) {
-          const partEntities = allCleaned.filter(
-            (e) => part.entityIds.includes(e.id),
-          );
-          const { cleaned, report } = cleanEntities(partEntities);
-
-          // Replace cleaned entities back into the full array
-          const cleanedIds = new Set(cleaned.map((e) => e.id));
-          const removedIds = new Set(
-            partEntities.filter((e) => !cleanedIds.has(e.id)).map((e) => e.id),
-          );
-          allCleaned = allCleaned.filter((e) => !removedIds.has(e.id));
-
-          // Update part entityIds to remove cleaned-out entities
-          const updatedEntityIds = part.entityIds.filter(
-            (id) => !removedIds.has(id),
-          );
-          setParts((prev) =>
-            prev.map((p) =>
-              p.id === part.id ? { ...p, entityIds: updatedEntityIds } : p,
-            ),
-          );
-
-          newReports.set(part.id, report);
-        }
-
-        setEntities(allCleaned);
-        setCleanReports(newReports);
+        setEntities(cleaned.entities);
+        setParts(cleaned.parts);
+        setCleanReports(cleaned.reports);
       }
 
       // F5 auto-classification: when entering "classify" step
       if (nextStep === "classify") {
-        const classified = classifyEntities(entities);
+        const classified = classifyAssignedParts(entities, parts);
         setEntities(classified);
       }
 
@@ -155,28 +167,32 @@ export function AppShell() {
     setFileName(name);
 
     // Dynamic import of parser to avoid bundling issues
-    import("@/lib/dxf/parser").then(({ parseDxf }) => {
-      try {
-        const result = parseDxf(content);
-        setEntities(result.entities);
-        setParseStats(result.stats);
-      } catch {
-        // Parser not yet implemented -- show error
+    import("@/lib/dxf/parser")
+      .then(({ parseDxf }) => {
+        try {
+          const result = parseDxf(content);
+          setEntities(result.entities);
+          setParseStats(result.stats);
+        } catch {
+          // Parser not yet implemented -- show error
+          setParseStats({
+            totalEntities: 0,
+            byType: {},
+            layers: [],
+            warnings: [
+              "Parser noch nicht implementiert. Bitte Backend-Entwicklung abwarten.",
+            ],
+          });
+        }
+      })
+      .catch(() => {
         setParseStats({
           totalEntities: 0,
           byType: {},
           layers: [],
-          warnings: ["Parser noch nicht implementiert. Bitte Backend-Entwicklung abwarten."],
+          warnings: ["Parser-Modul konnte nicht geladen werden."],
         });
-      }
-    }).catch(() => {
-      setParseStats({
-        totalEntities: 0,
-        byType: {},
-        layers: [],
-        warnings: ["Parser-Modul konnte nicht geladen werden."],
       });
-    });
   }, []);
 
   // ---- F3: Parts ----
@@ -217,13 +233,7 @@ export function AppShell() {
       }
 
       // Add entities to active part
-      setParts((prev) =>
-        prev.map((p) =>
-          p.id === activePart
-            ? { ...p, entityIds: [...new Set([...p.entityIds, ...entityIds])] }
-            : p,
-        ),
-      );
+      setParts((prev) => assignEntitiesToPart(prev, activePart, entityIds));
 
       // Set partId on entities
       setEntities((prev) =>
@@ -235,12 +245,34 @@ export function AppShell() {
     [activePart],
   );
 
+  const handleEntityDeselected = useCallback(
+    (entityId: number) => {
+      if (!activePart) return;
+
+      // Entity aus dem aktiven Part entfernen
+      setParts((prev) =>
+        prev.map((part) =>
+          part.id === activePart
+            ? { ...part, entityIds: part.entityIds.filter((id) => id !== entityId) }
+            : part,
+        ),
+      );
+
+      // partId von der Entity entfernen
+      setEntities((prev) =>
+        prev.map((e) =>
+          e.id === entityId && e.partId === activePart
+            ? { ...e, partId: undefined }
+            : e,
+        ),
+      );
+    },
+    [activePart],
+  );
+
   const handleEntityClicked = useCallback(
     (entityId: number) => {
-      if (workflowStep === "select") {
-        handleEntitiesSelected([entityId]);
-      } else if (workflowStep === "classify" && activeClassification) {
-        // Classify the clicked entity
+      if (workflowStep === "classify" && activeClassification) {
         const config = getLayerConfig(activeClassification);
         setEntities((prev) =>
           prev.map((e) =>
@@ -256,7 +288,7 @@ export function AppShell() {
         );
       }
     },
-    [workflowStep, activeClassification, handleEntitiesSelected],
+    [workflowStep, activeClassification],
   );
 
   const handleClassifyEntities = useCallback(
@@ -288,13 +320,13 @@ export function AppShell() {
       BEND: 0,
       ENGRAVE: 0,
     };
-    for (const entity of entities) {
+    for (const entity of displayedPartEntities) {
       if (entity.classification) {
         stats[entity.classification]++;
       }
     }
     return stats;
-  }, [entities]);
+  }, [displayedPartEntities]);
 
   // ---- F6: Export ----
   const handleExportPart = useCallback(
@@ -303,21 +335,27 @@ export function AppShell() {
       if (!part || !projectInfo) return;
 
       // Dynamic import of exporter
-      import("@/lib/dxf/exporter").then(({ exportDxf }) => {
-        try {
-          const partEntities = entities.filter(
-            (e) => part.entityIds.includes(e.id),
-          );
-          const dxfContent = exportDxf(partEntities, projectInfo, part);
-          const exportFilename = generateExportFilename(projectInfo, part.name, parts.length);
-          triggerDownload(dxfContent, exportFilename);
-        } catch {
-          // Exporter not yet implemented
-          console.error("Exporter noch nicht implementiert.");
-        }
-      }).catch(() => {
-        console.error("Exporter-Modul konnte nicht geladen werden.");
-      });
+      import("@/lib/dxf/exporter")
+        .then(({ exportDxf }) => {
+          try {
+            const partEntities = entities.filter((e) =>
+              part.entityIds.includes(e.id),
+            );
+            const dxfContent = exportDxf(partEntities, projectInfo, part);
+            const exportFilename = generateExportFilename(
+              projectInfo,
+              part.name,
+              parts.length,
+            );
+            triggerDownload(dxfContent, exportFilename);
+          } catch {
+            // Exporter not yet implemented
+            console.error("Exporter noch nicht implementiert.");
+          }
+        })
+        .catch(() => {
+          console.error("Exporter-Modul konnte nicht geladen werden.");
+        });
     },
     [parts, entities, projectInfo],
   );
@@ -343,9 +381,7 @@ export function AppShell() {
       {/* Header */}
       <header className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-4 py-3">
         <div className="flex items-center gap-4">
-          <h1 className="text-base font-bold text-gray-900">
-            Laser DXF-Maker
-          </h1>
+          <h1 className="text-base font-bold text-gray-900">Laser DXF-Maker</h1>
           {projectInfo && (
             <span className="text-xs text-gray-500">
               {projectInfo.customerName} / {projectInfo.projectNumber}
@@ -387,11 +423,11 @@ export function AppShell() {
             {/* Editor area */}
             <div className="flex-1">
               <DxfEditor
+                key={activePart ?? "no-part"}
                 entities={entities}
                 mode="select"
-                activePartId={activePart}
                 onEntitiesSelected={handleEntitiesSelected}
-                onEntityClicked={handleEntityClicked}
+                onEntityDeselected={handleEntityDeselected}
               />
             </div>
             {/* Sidebar */}
@@ -409,38 +445,79 @@ export function AppShell() {
         {workflowStep === "clean" && (
           <div className="flex flex-1 gap-6 p-8">
             <div className="flex-1">
-              <DxfEditor
-                entities={entities}
-                mode="select"
-                activePartId={activePart}
-              />
+              <div className="mb-3 flex items-center justify-between rounded-lg border border-gray-200 bg-white px-4 py-3">
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">
+                    Arbeitsansicht: {displayedPart?.name ?? "Kein Teil aktiv"}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    {displayedPartEntities.length} bereinigte Entities im
+                    aktiven Teil
+                  </p>
+                </div>
+                <p className="text-xs text-gray-400">
+                  Nur die gewaehlte Teilgeometrie bleibt ab F4 sichtbar.
+                </p>
+              </div>
+              <DxfEditor entities={displayedPartEntities} mode="select" />
             </div>
-            <aside className="w-80 shrink-0 overflow-y-auto">
+            <aside className="w-80 shrink-0 space-y-4 overflow-y-auto">
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <PartsList
+                  parts={populatedParts}
+                  activePart={displayedPartId}
+                  onSelectPart={handleSelectPart}
+                  showCreateButton={false}
+                  emptyText="Keine bereinigten Teile vorhanden."
+                />
+              </div>
               <CleanReport reports={cleanReports} partNames={partNames} />
             </aside>
           </div>
         )}
 
         {workflowStep === "classify" && (
-          <div className="flex flex-1 flex-col">
+          <div className="flex flex-1">
             {/* Classify toolbar */}
-            <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-2">
-              <ClassifyToolbar
-                activeClassification={activeClassification}
-                onClassificationChange={setActiveClassification}
-                stats={classificationStats}
-              />
+            <div className="flex min-w-0 flex-1 flex-col">
+              <div className="shrink-0 border-b border-gray-200 bg-white px-4 py-2">
+                <div className="flex items-center justify-between gap-4">
+                  <ClassifyToolbar
+                    activeClassification={activeClassification}
+                    onClassificationChange={setActiveClassification}
+                    stats={classificationStats}
+                  />
+                  <div className="text-right text-xs text-gray-500">
+                    <p className="font-medium text-gray-700">
+                      Aktives Teil: {displayedPart?.name ?? "-"}
+                    </p>
+                    <p>
+                      {displayedPartEntities.length} Entities in der
+                      Arbeitsansicht
+                    </p>
+                  </div>
+                </div>
+              </div>
+              {/* Editor */}
+              <div className="flex-1">
+                <DxfEditor
+                  entities={displayedPartEntities}
+                  mode="classify"
+                  activeClassification={activeClassification}
+                  onEntitiesSelected={handleClassifyEntities}
+                  onEntityClicked={handleEntityClicked}
+                />
+              </div>
             </div>
-            {/* Editor */}
-            <div className="flex-1">
-              <DxfEditor
-                entities={entities}
-                mode="classify"
-                activeClassification={activeClassification}
-                onEntitiesSelected={handleClassifyEntities}
-                onEntityClicked={handleEntityClicked}
+            <aside className="w-72 shrink-0 border-l border-gray-200 bg-white p-4">
+              <PartsList
+                parts={populatedParts}
+                activePart={displayedPartId}
+                onSelectPart={handleSelectPart}
+                showCreateButton={false}
+                emptyText="Keine Teile fuer die Klassifizierung vorhanden."
               />
-            </div>
+            </aside>
           </div>
         )}
 
