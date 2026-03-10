@@ -90,8 +90,8 @@ export interface EntityCoordinates {
   startAngle?: number;
   endAngle?: number;
 
-  /** LWPOLYLINE: Point list */
-  points?: Array<{ x: number; y: number }>;
+  /** LWPOLYLINE/SPLINE: Point list. Bulge definiert Bogen zum naechsten Punkt. */
+  points?: Array<{ x: number; y: number; bulge?: number }>;
 
   /** TEXT: Position */
   x?: number;

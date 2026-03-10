@@ -34,6 +34,37 @@ const MAX_FILE_SIZE = 50 * 1024 * 1024;
 /** Maximum number of entities before a warning is issued */
 const MAX_ENTITY_COUNT = 100_000;
 
+/**
+ * Sammelt Warnungen und zaehlt Duplikate.
+ *
+ * Identische Warnungen werden gruppiert und bei der Ausgabe mit Zaehler versehen:
+ *   - 1x: "Warnung" (ohne Zaehler)
+ *   - 47x: "Warnung (47x)"
+ *
+ * Die Reihenfolge entspricht dem ersten Auftreten jeder einzigartigen Warnung.
+ */
+class WarningCollector {
+  private counts = new Map<string, number>();
+  private order: string[] = [];
+
+  push(message: string): void {
+    const existing = this.counts.get(message);
+    if (existing !== undefined) {
+      this.counts.set(message, existing + 1);
+    } else {
+      this.order.push(message);
+      this.counts.set(message, 1);
+    }
+  }
+
+  toArray(): string[] {
+    return this.order.map((msg) => {
+      const count = this.counts.get(msg)!;
+      return count > 1 ? `${msg} (${count}x)` : msg;
+    });
+  }
+}
+
 export function parseDxf(content: string): ParseResult {
   // Reject oversized files
   if (content.length > MAX_FILE_SIZE) {
@@ -64,7 +95,7 @@ export function parseDxf(content: string): ParseResult {
   }
 
   // Parse entities
-  const warnings: string[] = [];
+  const warnings = new WarningCollector();
   const entities = parseEntitiesSection(lines, entitiesStart, warnings);
 
   if (entities.length === 0) {
@@ -77,8 +108,10 @@ export function parseDxf(content: string): ParseResult {
     );
   }
 
+  // Keine manuelle Deduplizierung mehr noetig -- WarningCollector macht das
+
   // Build statistics
-  const stats = buildStats(entities, warnings);
+  const stats = buildStats(entities, warnings.toArray());
 
   return { entities, stats };
 }
@@ -161,12 +194,13 @@ const SUPPORTED_TYPES = new Set<string>([
   "TEXT",
   "DIMENSION",
   "POLYLINE", // Treated as LWPOLYLINE
+  "MTEXT",    // Treated as TEXT
 ]);
 
 function parseEntitiesSection(
   lines: string[],
   startIndex: number,
-  warnings: string[],
+  warnings: WarningCollector,
 ): DxfEntityV2[] {
   const entities: DxfEntityV2[] = [];
   let id = 0;
@@ -239,13 +273,53 @@ function parseEntitiesSection(
 }
 
 /**
+ * Bereinigt DXF-MTEXT-Formatierungssequenzen aus dem Rohtext.
+ *
+ * Behandelte Sequenzen:
+ *   \P         -> Leerzeichen (Absatzumbruch)
+ *   \~~        -> Leerzeichen (geschuetztes Leerzeichen)
+ *   {\H2.5;..} -> Formatblock entfernen (Inhalt beibehalten)
+ *   \A1;       -> Steuersequenz entfernen
+ *   \H2.5;     -> Steuersequenz entfernen
+ *   { }        -> Verbleibende Klammern entfernen
+ */
+function normalizeMText(raw: string): string {
+  let text = raw;
+
+  // 1. Formatbloecke aufloesen: {\\X...;content} -> content
+  //    Wiederholte Anwendung fuer verschachtelte Bloecke
+  let prev = "";
+  let iterations = 0;
+  while (text !== prev && iterations < 10) {
+    prev = text;
+    text = text.replace(/\{\\[^{}]*?;([^{}]*)\}/g, "$1");
+    iterations++;
+  }
+
+  // 2. Freisteehende Steuersequenzen: \A1; \H2.5; \fArial; etc.
+  text = text.replace(/\\[A-Za-z][^;]*;/g, "");
+
+  // 3. Absatzumbrueche und geschuetzte Leerzeichen
+  text = text.replace(/\\P/gi, " ");
+  text = text.replace(/\\~~/g, " ");
+
+  // 4. Verbleibende geschweifte Klammern
+  text = text.replace(/[{}]/g, "");
+
+  // 5. Trim und Mehrfach-Leerzeichen
+  text = text.replace(/\s+/g, " ").trim();
+
+  return text;
+}
+
+/**
  * Parse a single entity from its group-code pairs.
  */
 function parseEntity(
   entityType: string,
   pairs: GroupPair[],
   id: number,
-  warnings: string[],
+  warnings: WarningCollector,
 ): DxfEntityV2 | null {
   // Extract common properties
   const layer = getStringValue(pairs, 8) ?? "0";
@@ -298,7 +372,7 @@ function parseEntity(
       const closedFlag = getIntValue(pairs, 70) ?? 0;
       closed = (closedFlag & 1) === 1;
       coordinates = { points };
-      length = calculatePolylineLength(points, closed);
+      length = calculatePolylineLengthWithBulge(points, closed);
       break;
     }
 
@@ -318,6 +392,25 @@ function parseEntity(
       // Dimensions are parsed so the cleaner can remove them.
       // We don't extract geometry -- just mark them.
       coordinates = {};
+      length = 0;
+      break;
+    }
+
+    case "MTEXT": {
+      type = "TEXT"; // MTEXT wird als TEXT gespeichert
+      const x = getFloatValue(pairs, 10) ?? 0;
+      const y = getFloatValue(pairs, 20) ?? 0;
+      const height = getFloatValue(pairs, 40) ?? 1;
+
+      // MTEXT-Text: Code 3 (Fragmente, in Reihenfolge) + Code 1 (letztes Fragment)
+      const textParts3 = pairs
+        .filter((p) => p.code === 3)
+        .map((p) => p.value);
+      const textPart1 = getStringValue(pairs, 1) ?? "";
+      const rawText = [...textParts3, textPart1].join("");
+
+      const text = normalizeMText(rawText);
+      coordinates = { x, y, text, height };
       length = 0;
       break;
     }
@@ -350,7 +443,7 @@ function parsePolylineEntity(
   lines: string[],
   startIndex: number,
   id: number,
-  warnings: string[],
+  warnings: WarningCollector,
 ): { entity: DxfEntityV2; nextIndex: number } | null {
   const layer = getStringValue(headerPairs, 8) ?? "0";
   const color = getIntValue(headerPairs, 62) ?? 7;
@@ -436,28 +529,49 @@ function getFloatValue(pairs: GroupPair[], code: number): number | undefined {
   return isNaN(val) ? undefined : val;
 }
 
+/** Schwellwert: Bulge-Werte mit |bulge| < BULGE_THRESHOLD werden als gerade Linie behandelt. */
+export const BULGE_THRESHOLD = 0.0001;
+
 /**
  * Extract LWPOLYLINE points from group-code pairs.
  * Points are defined by multiple code-10/20 pairs in sequence.
+ * Group Code 42 = Bulge value for arc segments.
  */
 function extractPolylinePoints(
   pairs: GroupPair[],
-): Array<{ x: number; y: number }> {
-  const points: Array<{ x: number; y: number }> = [];
+): Array<{ x: number; y: number; bulge?: number }> {
   const xValues: number[] = [];
   const yValues: number[] = [];
+  const bulgeValues = new Map<number, number>();
+
+  let currentPointIndex = -1;
 
   for (const pair of pairs) {
     if (pair.code === 10) {
       xValues.push(parseFloat(pair.value) || 0);
+      currentPointIndex = xValues.length - 1;
     } else if (pair.code === 20) {
       yValues.push(parseFloat(pair.value) || 0);
+    } else if (pair.code === 42) {
+      // Group Code 42 = Bulge, gehoert zum zuletzt gelesenen Punkt (nach Code 10)
+      const b = parseFloat(pair.value);
+      if (!isNaN(b) && Math.abs(b) >= BULGE_THRESHOLD && currentPointIndex >= 0) {
+        bulgeValues.set(currentPointIndex, b);
+      }
     }
   }
 
   const count = Math.min(xValues.length, yValues.length);
+  const points: Array<{ x: number; y: number; bulge?: number }> = [];
   for (let i = 0; i < count; i++) {
-    points.push({ x: xValues[i], y: yValues[i] });
+    const point: { x: number; y: number; bulge?: number } = {
+      x: xValues[i],
+      y: yValues[i],
+    };
+    if (bulgeValues.has(i)) {
+      point.bulge = bulgeValues.get(i);
+    }
+    points.push(point);
   }
 
   return points;
@@ -495,6 +609,70 @@ function calculatePolylineLength(
     const dy = first.y - last.y;
     length += Math.sqrt(dx * dx + dy * dy);
   }
+  return length;
+}
+
+/**
+ * Berechnet die Bogenlaenge eines Bulge-Segments.
+ *
+ * Mathematik:
+ *   theta = 4 * atan(|bulge|)       -- Bogenwinkel
+ *   r = chord / (2 * sin(theta/2))  -- Radius
+ *   Bogenlaenge = r * theta
+ */
+function bulgeToArcLength(
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  bulge: number,
+): number {
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const chord = Math.sqrt(dx * dx + dy * dy);
+
+  // Identische Punkte: keine Laenge
+  if (chord < 1e-10) return 0;
+
+  // Sicherheits-Check (sollte vom Caller bereits gefiltert sein)
+  if (Math.abs(bulge) < BULGE_THRESHOLD) return chord;
+
+  const theta = 4 * Math.atan(Math.abs(bulge));
+
+  // Schutz vor Division durch Null bei theta nahe 2*PI
+  const sinHalfTheta = Math.sin(theta / 2);
+  if (Math.abs(sinHalfTheta) < 1e-10) {
+    // Nahezu Vollkreis: Umfang = chord * PI (Durchmesser = chord)
+    return chord * Math.PI;
+  }
+
+  const r = chord / (2 * sinHalfTheta);
+  return Math.abs(r * theta);
+}
+
+/**
+ * Berechnet die Gesamtlaenge einer Polylinie mit Bulge-Unterstuetzung.
+ */
+function calculatePolylineLengthWithBulge(
+  points: Array<{ x: number; y: number; bulge?: number }>,
+  closed?: boolean,
+): number {
+  if (points.length < 2) return 0;
+
+  let length = 0;
+  const segmentCount = closed ? points.length : points.length - 1;
+
+  for (let i = 0; i < segmentCount; i++) {
+    const p1 = points[i];
+    const p2 = points[(i + 1) % points.length];
+
+    if (p1.bulge !== undefined && Math.abs(p1.bulge) >= BULGE_THRESHOLD) {
+      length += bulgeToArcLength(p1, p2, p1.bulge);
+    } else {
+      const dx = p2.x - p1.x;
+      const dy = p2.y - p1.y;
+      length += Math.sqrt(dx * dx + dy * dy);
+    }
+  }
+
   return length;
 }
 

@@ -16,6 +16,7 @@
 
 import { memo } from "react";
 import type { DxfEntityV2 } from "@/types/dxf-v2";
+import { BULGE_THRESHOLD } from "@/lib/dxf/parser";
 import type { ClassificationType } from "@/types/classification";
 import { getLayerConfig } from "@/types/classification";
 
@@ -217,17 +218,71 @@ function circleToPath(c: DxfEntityV2["coordinates"]): string | null {
   ].join(" ");
 }
 
+/**
+ * Konvertiert ein Bulge-Segment in einen SVG-Arc-String.
+ *
+ * Sweep-Richtung:
+ *   sweep = bulge > 0 ? 1 : 0
+ *   Dies ist KORREKT weil DxfEditor.tsx <g transform="scale(1,-1)"> verwendet.
+ *   Ohne diese Y-Spiegelung waeren alle Boegen spiegelverkehrt!
+ */
+function bulgeToSvgArc(
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  bulge: number,
+): string {
+  const dx = p2.x - p1.x;
+  const dy = p2.y - p1.y;
+  const chord = Math.sqrt(dx * dx + dy * dy);
+
+  if (chord < 1e-10) return "";
+
+  const theta = 4 * Math.atan(Math.abs(bulge));
+
+  const sinHalfTheta = Math.sin(theta / 2);
+  // Schutz vor Division durch Null
+  const r =
+    Math.abs(sinHalfTheta) < 1e-10
+      ? chord * 1000 // Fallback: grosser Radius ergibt visuell fast gerade Linie (Faktor 1000 ist beliebig gross genug)
+      : chord / (2 * sinHalfTheta);
+
+  const largeArc = theta > Math.PI ? 1 : 0;
+  // Korrekt NUR mit scale(1,-1) im SVG-Container!
+  const sweep = bulge > 0 ? 1 : 0;
+
+  return `A${r},${r} 0 ${largeArc},${sweep} ${p2.x},${p2.y}`;
+}
+
 function polylineToPath(
   c: DxfEntityV2["coordinates"],
   closed?: boolean,
 ): string | null {
   if (!c.points || c.points.length < 2) return null;
 
-  const parts: string[] = [`M${c.points[0].x},${c.points[0].y}`];
-  for (let i = 1; i < c.points.length; i++) {
-    parts.push(`L${c.points[i].x},${c.points[i].y}`);
+  const points = c.points;
+  const parts: string[] = [`M${points[0].x},${points[0].y}`];
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const p1 = points[i];
+    const p2 = points[i + 1];
+
+    if (p1.bulge !== undefined && Math.abs(p1.bulge) >= BULGE_THRESHOLD) {
+      parts.push(bulgeToSvgArc(p1, p2, p1.bulge));
+    } else {
+      parts.push(`L${p2.x},${p2.y}`);
+    }
   }
-  if (closed) parts.push("Z");
+
+  // Geschlossene Polylinie: letztes Segment (letzter Punkt -> erster Punkt)
+  if (closed && points.length > 1) {
+    const lastPt = points[points.length - 1];
+    const firstPt = points[0];
+    if (lastPt.bulge !== undefined && Math.abs(lastPt.bulge) >= BULGE_THRESHOLD) {
+      parts.push(bulgeToSvgArc(lastPt, firstPt, lastPt.bulge));
+    } else {
+      parts.push("Z");
+    }
+  }
 
   return parts.join(" ");
 }
