@@ -20,8 +20,8 @@ function makeEntity(
   overrides: Partial<DxfEntityV2> & { id: number; type: DxfEntityV2["type"] },
 ): DxfEntityV2 {
   return {
-    layer: "CUT_OUTER",
-    color: 1,
+    layer: "CUT",
+    color: 7,
     linetype: "CONTINUOUS",
     coordinates: {},
     length: 0,
@@ -55,8 +55,8 @@ describe("exportDxf", () => {
       makeEntity({
         id: 0,
         type: "LINE",
-        layer: "CUT_OUTER",
-        color: 1,
+        layer: "CUT",
+        color: 7,
         coordinates: { x1: 0, y1: 0, x2: 10, y2: 10 },
       }),
     ];
@@ -64,8 +64,7 @@ describe("exportDxf", () => {
     const output = exportDxf(entities);
 
     expect(output).toContain("TABLES");
-    expect(output).toContain("CUT_OUTER");
-    expect(output).toContain("CUT_INNER");
+    expect(output).toContain("CUT");
     expect(output).toContain("BEND");
     expect(output).toContain("ENGRAVE");
   });
@@ -76,8 +75,8 @@ describe("exportDxf", () => {
       makeEntity({
         id: 0,
         type: "LINE",
-        layer: "CUT_OUTER",
-        color: 1,
+        layer: "CUT",
+        color: 7,
         coordinates: { x1: 10, y1: 20, x2: 30, y2: 40 },
       }),
     ];

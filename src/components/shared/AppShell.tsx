@@ -28,6 +28,7 @@ import {
   cleanAssignedParts,
   getAssignedPartEntities,
   getPopulatedParts,
+  removeEntityFromPart,
 } from "@/lib/workflow/part-workflow";
 import { getLayerConfig } from "@/types/classification";
 
@@ -71,7 +72,7 @@ export function AppShell() {
     Map<string, CleanReportType>
   >(new Map());
   const [activeClassification, setActiveClassification] =
-    useState<ClassificationType>("CUT_OUTER");
+    useState<ClassificationType>("CUT");
   const [fileName, setFileName] = useState("");
 
   // ---- Derived State ----
@@ -118,6 +119,11 @@ export function AppShell() {
     const entityIds = new Set(displayedPart.entityIds);
     return entities.filter((entity) => entityIds.has(entity.id));
   }, [displayedPart, entities]);
+
+  const activePartDefinition = useMemo(
+    () => parts.find((part) => part.id === activePart) ?? null,
+    [activePart, parts],
+  );
 
   // ---- Navigation ----
   const goNext = useCallback(() => {
@@ -249,16 +255,8 @@ export function AppShell() {
     (entityId: number) => {
       if (!activePart) return;
 
-      // Entity aus dem aktiven Part entfernen
-      setParts((prev) =>
-        prev.map((part) =>
-          part.id === activePart
-            ? { ...part, entityIds: part.entityIds.filter((id) => id !== entityId) }
-            : part,
-        ),
-      );
+      setParts((prev) => removeEntityFromPart(prev, activePart, entityId));
 
-      // partId von der Entity entfernen
       setEntities((prev) =>
         prev.map((e) =>
           e.id === entityId && e.partId === activePart
@@ -315,8 +313,7 @@ export function AppShell() {
   // ---- F5: Classification stats ----
   const classificationStats = useMemo(() => {
     const stats: Record<ClassificationType, number> = {
-      CUT_OUTER: 0,
-      CUT_INNER: 0,
+      CUT: 0,
       BEND: 0,
       ENGRAVE: 0,
     };
@@ -426,12 +423,28 @@ export function AppShell() {
                 key={activePart ?? "no-part"}
                 entities={entities}
                 mode="select"
+                selectedEntityIds={activePartDefinition?.entityIds ?? []}
                 onEntitiesSelected={handleEntitiesSelected}
                 onEntityDeselected={handleEntityDeselected}
               />
             </div>
             {/* Sidebar */}
-            <aside className="w-64 shrink-0 overflow-y-auto border-l border-gray-200 bg-white p-4">
+            <aside className="w-72 shrink-0 space-y-4 overflow-y-auto border-l border-gray-200 bg-white p-4">
+              <div className="rounded-lg border border-orange-200 bg-orange-50 p-4">
+                <p className="text-xs font-semibold tracking-wide text-orange-700 uppercase">
+                  F3 Auswahl
+                </p>
+                <p className="mt-2 text-sm font-semibold text-gray-900">
+                  {activePartDefinition
+                    ? `${activePartDefinition.name}: ${activePartDefinition.entityIds.length} Entities markiert`
+                    : "Noch kein Teil aktiv"}
+                </p>
+                <p className="mt-2 text-xs leading-5 text-gray-600">
+                  Fenster oder Klick fuegt Geometrie zum aktiven Teil hinzu. Ein
+                  Klick auf bereits orange markierte Geometrie entfernt sie
+                  wieder aus dem Teil.
+                </p>
+              </div>
               <PartsList
                 parts={parts}
                 activePart={activePart}

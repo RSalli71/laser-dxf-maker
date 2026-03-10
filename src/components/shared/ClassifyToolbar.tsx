@@ -1,7 +1,7 @@
 /**
- * ClassifyToolbar -- F5: 4 Kategorie-Buttons fuer die Klassifizierung.
+ * ClassifyToolbar -- F5: 3 Kategorie-Buttons fuer die Klassifizierung.
  *
- * Aussenkontur (Rot), Innenkontur (Blau), Biegung (Gelb), Gravur (Gruen).
+ * Schneidkontur (Grau/Schwarz), Biegung (Gruen), Gravur (Rot).
  * Der aktive Button ist hervorgehoben. Statistik unter jedem Button.
  */
 
@@ -25,36 +25,28 @@ const BUTTONS: {
   borderColor: string;
 }[] = [
   {
-    type: "CUT_OUTER",
-    label: "Aussenkontur",
-    bgColor: "bg-red-50",
-    activeColor: "bg-red-600",
-    textColor: "text-red-700",
-    borderColor: "border-red-300",
-  },
-  {
-    type: "CUT_INNER",
-    label: "Innenkontur",
-    bgColor: "bg-blue-50",
-    activeColor: "bg-blue-600",
-    textColor: "text-blue-700",
-    borderColor: "border-blue-300",
+    type: "CUT",
+    label: "Schneidkontur",
+    bgColor: "bg-gray-50",
+    activeColor: "bg-gray-700",
+    textColor: "text-gray-700",
+    borderColor: "border-gray-300",
   },
   {
     type: "BEND",
     label: "Biegung",
-    bgColor: "bg-yellow-50",
-    activeColor: "bg-yellow-500",
-    textColor: "text-yellow-700",
-    borderColor: "border-yellow-300",
-  },
-  {
-    type: "ENGRAVE",
-    label: "Gravur",
     bgColor: "bg-green-50",
     activeColor: "bg-green-600",
     textColor: "text-green-700",
     borderColor: "border-green-300",
+  },
+  {
+    type: "ENGRAVE",
+    label: "Gravur",
+    bgColor: "bg-red-50",
+    activeColor: "bg-red-600",
+    textColor: "text-red-700",
+    borderColor: "border-red-300",
   },
 ];
 

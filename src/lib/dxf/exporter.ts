@@ -122,7 +122,7 @@ function writeLayerTable(lines: string[], entities: DxfEntityV2[]): void {
   // Collect layers actually used in entities
   const usedLayers = new Set(entities.map((e) => e.layer));
 
-  // Always include the four classification layers
+  // Always include the three classification layers
   for (const config of LAYER_CONFIGS) {
     usedLayers.add(config.layerName);
   }

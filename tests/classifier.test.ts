@@ -3,8 +3,7 @@
  *
  * Covers acceptance criteria from REQUIREMENTS.md F5:
  * - TEXT -> ENGRAVE
- * - Largest closed contour -> CUT_OUTER
- * - Smaller closed contours -> CUT_INNER
+ * - Closed contours -> CUT
  * - Short lines -> BEND
  * - Layer and color set correctly per LAYER_CONFIGS
  */
@@ -49,13 +48,13 @@ describe("classifyEntities", () => {
 
     expect(result[0].classification).toBe("ENGRAVE");
     expect(result[0].layer).toBe("ENGRAVE");
-    expect(result[0].color).toBe(3); // ACI 3 = Green
+    expect(result[0].color).toBe(1); // ACI 1 = Red
   });
 
-  // F5 AC: Groesste geschlossene Kontur wird CUT_OUTER
-  it("classifies the largest closed contour as CUT_OUTER", () => {
+  // F5 AC: Geschlossene Konturen werden CUT
+  it("classifies closed contours as CUT", () => {
     const entities: DxfEntityV2[] = [
-      // Large circle (outer contour)
+      // Large circle
       makeEntity({
         id: 0,
         type: "CIRCLE",
@@ -63,7 +62,7 @@ describe("classifyEntities", () => {
         length: 2 * Math.PI * 100,
         closed: true,
       }),
-      // Small circle (inner contour)
+      // Small circle
       makeEntity({
         id: 1,
         type: "CIRCLE",
@@ -75,12 +74,12 @@ describe("classifyEntities", () => {
 
     const result = classifyEntities(entities);
 
-    expect(result[0].classification).toBe("CUT_OUTER");
-    expect(result[1].classification).toBe("CUT_INNER");
+    expect(result[0].classification).toBe("CUT");
+    expect(result[1].classification).toBe("CUT");
   });
 
-  // F5 AC: Kleinere geschlossene Konturen werden CUT_INNER
-  it("classifies smaller closed contours as CUT_INNER", () => {
+  // F5 AC: Alle geschlossenen Konturen werden CUT
+  it("classifies all closed contours as CUT", () => {
     const entities: DxfEntityV2[] = [
       makeEntity({
         id: 0,
@@ -114,9 +113,9 @@ describe("classifyEntities", () => {
 
     const result = classifyEntities(entities);
 
-    expect(result[0].classification).toBe("CUT_OUTER");
-    expect(result[1].classification).toBe("CUT_INNER");
-    expect(result[2].classification).toBe("CUT_INNER");
+    expect(result[0].classification).toBe("CUT");
+    expect(result[1].classification).toBe("CUT");
+    expect(result[2].classification).toBe("CUT");
   });
 
   // F5 AC: Kurze gerade Linien werden BEND
@@ -134,11 +133,11 @@ describe("classifyEntities", () => {
 
     expect(result[0].classification).toBe("BEND");
     expect(result[0].layer).toBe("BEND");
-    expect(result[0].color).toBe(2); // ACI 2 = Yellow
+    expect(result[0].color).toBe(3); // ACI 3 = Green
   });
 
-  // Long lines default to CUT_INNER
-  it("classifies long lines as CUT_INNER (default)", () => {
+  // Long lines default to CUT
+  it("classifies long lines as CUT (default)", () => {
     const entities: DxfEntityV2[] = [
       makeEntity({
         id: 0,
@@ -150,11 +149,11 @@ describe("classifyEntities", () => {
 
     const result = classifyEntities(entities);
 
-    expect(result[0].classification).toBe("CUT_INNER");
+    expect(result[0].classification).toBe("CUT");
   });
 
   // F5 AC: Layer und Farbe werden korrekt gesetzt
-  it("sets correct layer and ACI color for CUT_OUTER", () => {
+  it("sets correct layer and ACI color for CUT", () => {
     const entities: DxfEntityV2[] = [
       makeEntity({
         id: 0,
@@ -167,11 +166,11 @@ describe("classifyEntities", () => {
 
     const result = classifyEntities(entities);
 
-    expect(result[0].layer).toBe("CUT_OUTER");
-    expect(result[0].color).toBe(1); // ACI 1 = Red
+    expect(result[0].layer).toBe("CUT");
+    expect(result[0].color).toBe(7); // ACI 7 = White/Black
   });
 
-  it("sets correct layer and ACI color for CUT_INNER", () => {
+  it("sets correct layer and ACI color for second closed contour (also CUT)", () => {
     const entities: DxfEntityV2[] = [
       makeEntity({
         id: 0,
@@ -191,8 +190,8 @@ describe("classifyEntities", () => {
 
     const result = classifyEntities(entities);
 
-    expect(result[1].layer).toBe("CUT_INNER");
-    expect(result[1].color).toBe(5); // ACI 5 = Blue
+    expect(result[1].layer).toBe("CUT");
+    expect(result[1].color).toBe(7); // ACI 7 = White/Black
   });
 
   // Does not mutate input
@@ -253,8 +252,8 @@ describe("classifyEntities", () => {
 
     const result = classifyEntities(entities);
 
-    expect(result[0].classification).toBe("CUT_OUTER");
-    expect(result[1].classification).toBe("CUT_INNER");
+    expect(result[0].classification).toBe("CUT");
+    expect(result[1].classification).toBe("CUT");
     expect(result[2].classification).toBe("BEND");
     expect(result[3].classification).toBe("ENGRAVE");
   });
@@ -263,17 +262,16 @@ describe("classifyEntities", () => {
 describe("getClassificationStats", () => {
   it("counts entities per classification type", () => {
     const entities: DxfEntityV2[] = [
-      makeEntity({ id: 0, type: "LINE", classification: "CUT_OUTER" }),
-      makeEntity({ id: 1, type: "LINE", classification: "CUT_INNER" }),
-      makeEntity({ id: 2, type: "LINE", classification: "CUT_INNER" }),
+      makeEntity({ id: 0, type: "LINE", classification: "CUT" }),
+      makeEntity({ id: 1, type: "LINE", classification: "CUT" }),
+      makeEntity({ id: 2, type: "LINE", classification: "CUT" }),
       makeEntity({ id: 3, type: "LINE", classification: "BEND" }),
       makeEntity({ id: 4, type: "TEXT", classification: "ENGRAVE" }),
     ];
 
     const stats = getClassificationStats(entities);
 
-    expect(stats.CUT_OUTER).toBe(1);
-    expect(stats.CUT_INNER).toBe(2);
+    expect(stats.CUT).toBe(3);
     expect(stats.BEND).toBe(1);
     expect(stats.ENGRAVE).toBe(1);
   });
@@ -285,8 +283,7 @@ describe("getClassificationStats", () => {
 
     const stats = getClassificationStats(entities);
 
-    expect(stats.CUT_OUTER).toBe(0);
-    expect(stats.CUT_INNER).toBe(0);
+    expect(stats.CUT).toBe(0);
     expect(stats.BEND).toBe(0);
     expect(stats.ENGRAVE).toBe(0);
   });
@@ -300,13 +297,13 @@ describe("applyClassification", () => {
       makeEntity({ id: 2, type: "CIRCLE", coordinates: { cx: 5, cy: 5, r: 10 }, length: 62.83 }),
     ];
 
-    const result = applyClassification(entities, new Set([0, 2]), "CUT_OUTER");
+    const result = applyClassification(entities, new Set([0, 2]), "CUT");
 
-    expect(result[0].classification).toBe("CUT_OUTER");
-    expect(result[0].layer).toBe("CUT_OUTER");
-    expect(result[0].color).toBe(1);
+    expect(result[0].classification).toBe("CUT");
+    expect(result[0].layer).toBe("CUT");
+    expect(result[0].color).toBe(7);
     expect(result[1].classification).toBeUndefined(); // unchanged
-    expect(result[2].classification).toBe("CUT_OUTER");
+    expect(result[2].classification).toBe("CUT");
   });
 
   it("does not mutate the original array", () => {

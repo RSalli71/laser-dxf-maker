@@ -1,17 +1,16 @@
 /**
  * Classification types for laser cutting operations.
  *
- * Each DXF entity is classified into one of four categories
+ * Each DXF entity is classified into one of three categories
  * that determine its layer name, color, and ACI number in the
- * exported DXF file.
+ * exported DXF file. Trumpf/Bystronic standard.
  *
  * Reference: docs/ARCHITECTURE.md "ClassificationType" + "LayerConfig"
  */
 
-/** The four laser-cutting classification categories */
+/** The three laser-cutting classification categories */
 export type ClassificationType =
-  | "CUT_OUTER"
-  | "CUT_INNER"
+  | "CUT"
   | "BEND"
   | "ENGRAVE";
 
@@ -25,33 +24,27 @@ export interface LayerConfig {
 }
 
 /**
- * Canonical layer configurations for all four classification types.
+ * Canonical layer configurations for all three classification types.
  * Used by the exporter (TABLES section) and classifier (color assignment).
  */
 export const LAYER_CONFIGS: readonly LayerConfig[] = [
   {
-    classification: "CUT_OUTER",
-    layerName: "CUT_OUTER",
-    hexColor: "#FF0000",
-    aciNumber: 1,
-  },
-  {
-    classification: "CUT_INNER",
-    layerName: "CUT_INNER",
-    hexColor: "#0000FF",
-    aciNumber: 5,
+    classification: "CUT",
+    layerName: "CUT",
+    hexColor: "#1a1a1a",
+    aciNumber: 7,
   },
   {
     classification: "BEND",
     layerName: "BEND",
-    hexColor: "#FFFF00",
-    aciNumber: 2,
+    hexColor: "#00cc00",
+    aciNumber: 3,
   },
   {
     classification: "ENGRAVE",
     layerName: "ENGRAVE",
-    hexColor: "#00CC00",
-    aciNumber: 3,
+    hexColor: "#ff0000",
+    aciNumber: 1,
   },
 ] as const;
 

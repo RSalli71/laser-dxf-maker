@@ -35,6 +35,8 @@ interface DxfEditorProps {
   mode: EditorMode;
   /** Active classification (F5: which category is being assigned) */
   activeClassification?: ClassificationType | null;
+  /** Controlled selection for F3. When provided, highlight follows workflow state. */
+  selectedEntityIds?: number[];
   /** Called when entities are selected via box or click */
   onEntitiesSelected?: (entityIds: number[]) => void;
   /** Called when a single entity is clicked */
@@ -117,23 +119,22 @@ function computeBoundingBox(entities: DxfEntityV2[]): BoundingBoxV2 {
 
 /** Classification color for selection rectangle */
 const CLASSIFICATION_RECT_COLORS: Record<ClassificationType, string> = {
-  CUT_OUTER: "rgba(255, 0, 0, 0.15)",
-  CUT_INNER: "rgba(0, 0, 255, 0.15)",
-  BEND: "rgba(255, 255, 0, 0.15)",
-  ENGRAVE: "rgba(0, 204, 0, 0.15)",
+  CUT: "rgba(26, 26, 26, 0.15)",
+  BEND: "rgba(0, 204, 0, 0.15)",
+  ENGRAVE: "rgba(255, 0, 0, 0.15)",
 };
 
 const CLASSIFICATION_STROKE_COLORS: Record<ClassificationType, string> = {
-  CUT_OUTER: "rgba(255, 0, 0, 0.6)",
-  CUT_INNER: "rgba(0, 0, 255, 0.6)",
-  BEND: "rgba(255, 255, 0, 0.6)",
-  ENGRAVE: "rgba(0, 204, 0, 0.6)",
+  CUT: "rgba(26, 26, 26, 0.6)",
+  BEND: "rgba(0, 204, 0, 0.6)",
+  ENGRAVE: "rgba(255, 0, 0, 0.6)",
 };
 
 export function DxfEditor({
   entities,
   mode,
   activeClassification,
+  selectedEntityIds: controlledSelectedEntityIds,
   onEntitiesSelected,
   onEntityClicked,
   onEntityDeselected,
@@ -159,8 +160,21 @@ export function DxfEditor({
     null,
   );
   const [hoveredEntityId, setHoveredEntityId] = useState<number | null>(null);
-  const [selectedEntityIds, setSelectedEntityIds] = useState<Set<number>>(
-    new Set(),
+  const [localSelectedEntityIds, setLocalSelectedEntityIds] = useState<
+    Set<number>
+  >(new Set());
+
+  const isSelectionControlled = controlledSelectedEntityIds !== undefined;
+  const effectiveSelectedEntityIds = useMemo(
+    () =>
+      isSelectionControlled
+        ? new Set(controlledSelectedEntityIds)
+        : localSelectedEntityIds,
+    [
+      controlledSelectedEntityIds,
+      isSelectionControlled,
+      localSelectedEntityIds,
+    ],
   );
 
   const isPanning = useRef(false);
@@ -271,19 +285,19 @@ export function DxfEditor({
 
         if (selectedIds.length > 0) {
           if (mode === "select") {
-            // Additiv: neue IDs zur bestehenden lokalen Auswahl hinzufuegen
-            setSelectedEntityIds((prev) => {
-              const next = new Set(prev);
-              for (const id of selectedIds) {
-                next.add(id);
-              }
-              return next;
-            });
+            if (!isSelectionControlled) {
+              setLocalSelectedEntityIds((prev) => {
+                const next = new Set(prev);
+                for (const id of selectedIds) {
+                  next.add(id);
+                }
+                return next;
+              });
+            }
             onEntitiesSelected?.(selectedIds);
           } else {
-            // Classify-Modus: unveraendert
             onEntitiesSelected?.(selectedIds);
-            setSelectedEntityIds(new Set(selectedIds));
+            setLocalSelectedEntityIds(new Set(selectedIds));
           }
         }
 
@@ -304,27 +318,32 @@ export function DxfEditor({
           const hit = hitTestEntity(world.x, world.y, entities, tolerance);
           if (hit) {
             if (mode === "select") {
-              // Toggle: wenn bereits in lokaler Auswahl, abwaehlen
-              const isCurrentlySelected = selectedEntityIds.has(hit.id);
+              const isCurrentlySelected = effectiveSelectedEntityIds.has(
+                hit.id,
+              );
               if (isCurrentlySelected) {
-                setSelectedEntityIds((prev) => {
-                  const next = new Set(prev);
-                  next.delete(hit.id);
-                  return next;
-                });
+                if (!isSelectionControlled) {
+                  setLocalSelectedEntityIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(hit.id);
+                    return next;
+                  });
+                }
                 onEntityDeselected?.(hit.id);
               } else {
-                setSelectedEntityIds((prev) => new Set(prev).add(hit.id));
+                if (!isSelectionControlled) {
+                  setLocalSelectedEntityIds((prev) =>
+                    new Set(prev).add(hit.id),
+                  );
+                }
                 onEntitiesSelected?.([hit.id]);
               }
             } else {
-              // Classify-Modus: unveraendert
               onEntityClicked?.(hit.id);
-              setSelectedEntityIds(new Set([hit.id]));
+              setLocalSelectedEntityIds(new Set([hit.id]));
             }
-          } else {
-            // Klick ins Leere: lokale Auswahl leeren (NICHT die Part-Zuordnung)
-            setSelectedEntityIds(new Set());
+          } else if (mode === "classify" || !isSelectionControlled) {
+            setLocalSelectedEntityIds(new Set());
           }
         }
       }
@@ -336,7 +355,8 @@ export function DxfEditor({
       selectionRect,
       entities,
       mode,
-      selectedEntityIds,
+      effectiveSelectedEntityIds,
+      isSelectionControlled,
       clientToWorld,
       containerSize.width,
       viewBoxRef,
@@ -381,7 +401,7 @@ export function DxfEditor({
   }, [selectionRect, mode, activeClassification]);
 
   // ---- Render ----
-  const hasSelection = selectedEntityIds.size > 0;
+  const hasSelection = effectiveSelectedEntityIds.size > 0;
 
   return (
     <div
@@ -420,9 +440,11 @@ export function DxfEditor({
             <EntityPath
               key={entity.id}
               entity={entity}
-              isSelected={selectedEntityIds.has(entity.id)}
+              isSelected={effectiveSelectedEntityIds.has(entity.id)}
               isHovered={hoveredEntityId === entity.id}
-              isDimmed={hasSelection && !selectedEntityIds.has(entity.id)}
+              isDimmed={
+                hasSelection && !effectiveSelectedEntityIds.has(entity.id)
+              }
               isAssigned={!!entity.partId}
             />
           ))}

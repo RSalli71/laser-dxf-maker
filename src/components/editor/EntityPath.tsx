@@ -7,7 +7,7 @@
  * (TEXT wird nicht als Pfad gerendert, DIMENSION wird vom Cleaner entfernt)
  *
  * Visuelles Feedback basiert auf:
- * - classification (CUT_OUTER, CUT_INNER, BEND, ENGRAVE)
+ * - classification (CUT, BEND, ENGRAVE)
  * - partId (zugeordnetes Teil)
  * - isSelected (vom Benutzer selektiert)
  *
@@ -17,7 +17,7 @@
 import { memo } from "react";
 import type { DxfEntityV2 } from "@/types/dxf-v2";
 import type { ClassificationType } from "@/types/classification";
-import { LAYER_CONFIGS } from "@/types/classification";
+import { getLayerConfig } from "@/types/classification";
 
 /** ACI-Farben Mapping (Subset der 256 AutoCAD-Farben) */
 const ACI_COLORS: Record<number, string> = {
@@ -39,10 +39,9 @@ const DEFAULT_COLOR = "#555555";
 
 /** Classification to hex color mapping */
 const CLASSIFICATION_COLORS: Record<ClassificationType, string> = {
-  CUT_OUTER: LAYER_CONFIGS[0].hexColor,
-  CUT_INNER: LAYER_CONFIGS[1].hexColor,
-  BEND: LAYER_CONFIGS[2].hexColor,
-  ENGRAVE: LAYER_CONFIGS[3].hexColor,
+  CUT: getLayerConfig("CUT")!.hexColor,
+  BEND: getLayerConfig("BEND")!.hexColor,
+  ENGRAVE: getLayerConfig("ENGRAVE")!.hexColor,
 };
 
 /**
@@ -92,12 +91,12 @@ function EntityPathInner({
   let dashArray: string | undefined;
 
   if (isSelected) {
-    // Selected entity: bright highlight
-    stroke = "hsl(210, 100%, 50%)";
-    sw = 2.5;
+    // Selected entity: high-contrast highlight for F3 review
+    stroke = "#ea580c";
+    sw = 3;
     opacity = 1;
   } else if (isHovered) {
-    stroke = "hsl(210, 80%, 60%)";
+    stroke = "#f97316";
     sw = 2;
     opacity = 0.9;
   } else if (entity.classification) {
@@ -131,6 +130,8 @@ function EntityPathInner({
       d={d}
       stroke={stroke}
       strokeWidth={sw}
+      strokeLinecap="round"
+      strokeLinejoin="round"
       fill="none"
       opacity={opacity}
       strokeDasharray={dashArray}
@@ -154,6 +155,7 @@ function entityToSvgPath(entity: DxfEntityV2): string | null {
     case "CIRCLE":
       return circleToPath(c);
     case "LWPOLYLINE":
+    case "SPLINE":
       return polylineToPath(c, entity.closed);
     default:
       return null;
