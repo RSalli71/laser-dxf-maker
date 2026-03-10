@@ -48,10 +48,26 @@ export function CleanReport({ reports, partNames }: CleanReportProps) {
             </div>
 
             <div className="grid grid-cols-2 gap-x-6 gap-y-1 px-4 py-3 text-xs">
+              <ReportRow
+                label="Hilfsbloecke"
+                count={report.removedHelperBlocks}
+              />
               <ReportRow label="Bemassungen" count={report.removedDimensions} />
               <ReportRow
-                label="Gewinde-Hilfslinien"
+                label="Hilfslinien (Linetype)"
                 count={report.removedThreadHelpers}
+              />
+              <ReportRow
+                label="Gewinde-Boegen"
+                count={report.removedThreadArcs}
+              />
+              <ReportRow
+                label="Gewinde-Splines"
+                count={report.removedThreadSplines}
+              />
+              <ReportRow
+                label="Kreuz-Muster"
+                count={report.removedCrossPatterns}
               />
               <ReportRow label="Duplikate" count={report.removedDuplicates} />
               <ReportRow label="Nulllinien" count={report.removedZeroLines} />
