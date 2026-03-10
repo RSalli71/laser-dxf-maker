@@ -26,6 +26,7 @@ export type DxfEntityType =
   | "ARC"
   | "CIRCLE"
   | "LWPOLYLINE"
+  | "SPLINE"
   | "TEXT"
   | "DIMENSION";
 
@@ -57,6 +58,9 @@ export interface DxfEntityV2 {
 
   /** Whether the entity is closed (Polyline, Circle) */
   closed?: boolean;
+
+  /** Source block name if resolved from an INSERT (e.g. "SW_CENTERMARKSYMBOL_0") */
+  sourceBlock?: string;
 
   // ---- Laser DXF-Maker extensions ----
 
@@ -176,8 +180,12 @@ export interface ViewBox {
  * Summarizes what was removed from a part.
  */
 export interface CleanReport {
+  removedHelperBlocks: number;
   removedDimensions: number;
   removedThreadHelpers: number;
+  removedThreadArcs: number;
+  removedThreadSplines: number;
+  removedCrossPatterns: number;
   removedDuplicates: number;
   removedZeroLines: number;
   removedEmptyLayers: string[];

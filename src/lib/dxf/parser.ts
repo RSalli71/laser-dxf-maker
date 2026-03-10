@@ -5,8 +5,13 @@
  * No external dependencies -- hand-written parser for full control
  * over the R12 ASCII format.
  *
- * Supported entity types: LINE, CIRCLE, ARC, LWPOLYLINE, TEXT, DIMENSION
+ * Supported entity types: LINE, CIRCLE, ARC, LWPOLYLINE, SPLINE, TEXT, DIMENSION
  * (DIMENSION is parsed so the cleaner can remove it; it has no coordinates.)
+ *
+ * Also supports:
+ * - BLOCKS section parsing (block definitions)
+ * - INSERT entities (block references -> resolved to flat entities)
+ * - Old-style POLYLINE with VERTEX sub-entities
  *
  * Reference: docs/ARCHITECTURE.md "src/lib/dxf/parser.ts"
  */
@@ -21,18 +26,17 @@ import type {
 
 // ---- Public API --------------------------------------------------------
 
-/**
- * Parse a DXF R12 ASCII string into entities and statistics.
- *
- * @param content - Raw DXF file content as string
- * @returns ParseResult with entities and stats
- * @throws Error if the file is binary DXF or completely unparseable
- */
 /** Maximum file size in bytes (50 MB) */
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
 /** Maximum number of entities before a warning is issued */
 const MAX_ENTITY_COUNT = 100_000;
+
+/** Maximum nested INSERT depth before resolution stops for safety */
+const MAX_INSERT_DEPTH = 16;
+
+/** Schwellwert: Bulge-Werte mit |bulge| < BULGE_THRESHOLD werden als gerade Linie behandelt. */
+export const BULGE_THRESHOLD = 0.0001;
 
 /**
  * Sammelt Warnungen und zaehlt Duplikate.
@@ -65,6 +69,13 @@ class WarningCollector {
   }
 }
 
+/**
+ * Parse a DXF R12 ASCII string into entities and statistics.
+ *
+ * @param content - Raw DXF file content as string
+ * @returns ParseResult with entities and stats
+ * @throws Error if the file is binary DXF or completely unparseable
+ */
 export function parseDxf(content: string): ParseResult {
   // Reject oversized files
   if (content.length > MAX_FILE_SIZE) {
@@ -86,6 +97,9 @@ export function parseDxf(content: string): ParseResult {
   // Split into lines (handle \r\n and \n)
   const lines = trimmed.split(/\r?\n/);
 
+  // Parse BLOCKS section (block definitions for INSERT resolution)
+  const blocks = parseBlocksSection(lines);
+
   // Find ENTITIES section
   const entitiesStart = findSectionStart(lines, "ENTITIES");
   if (entitiesStart === -1) {
@@ -94,9 +108,14 @@ export function parseDxf(content: string): ParseResult {
     );
   }
 
-  // Parse entities
+  // Parse entities (with INSERT resolution via blocks)
   const warnings = new WarningCollector();
-  const entities = parseEntitiesSection(lines, entitiesStart, warnings);
+  const entities = parseEntitiesSection(
+    lines,
+    entitiesStart,
+    blocks,
+    warnings,
+  );
 
   if (entities.length === 0) {
     warnings.push("Keine Entitaeten in der DXF-Datei gefunden.");
@@ -119,7 +138,6 @@ export function parseDxf(content: string): ParseResult {
 // ---- Binary detection --------------------------------------------------
 
 function isBinaryDxf(content: string): boolean {
-  // Binary DXF files start with "AutoCAD Binary DXF\r\n\x1a\x00"
   return content.startsWith("AutoCAD Binary DXF");
 }
 
@@ -184,6 +202,866 @@ function readEntityPairs(
   return { pairs, nextIndex: i };
 }
 
+// ---- BLOCKS section parsing --------------------------------------------
+
+/** A parsed block definition: name -> list of raw entities */
+interface BlockDefinition {
+  name: string;
+  /** Base point of the block (group codes 10/20) */
+  baseX: number;
+  baseY: number;
+  /** Raw entities within this block */
+  entities: BlockEntity[];
+}
+
+/** A raw entity within a block (before transformation) */
+interface BlockEntity {
+  type: string;
+  pairs: GroupPair[];
+  /** For old-style POLYLINE: collected vertex points */
+  polylineVertices?: Array<{ x: number; y: number }>;
+  polylineClosed?: boolean;
+}
+
+/**
+ * Parse the BLOCKS section to collect block definitions.
+ * Each block starts with "0 BLOCK" and ends with "0 ENDBLK".
+ */
+function parseBlocksSection(lines: string[]): Map<string, BlockDefinition> {
+  const blocks = new Map<string, BlockDefinition>();
+
+  const blocksStart = findSectionStart(lines, "BLOCKS");
+  if (blocksStart === -1) return blocks;
+
+  let i = blocksStart;
+
+  while (i < lines.length - 1) {
+    const code = lines[i].trim();
+    const value = lines[i + 1].trim();
+
+    // End of BLOCKS section
+    if (code === "0" && value === "ENDSEC") break;
+    if (code === "0" && value === "EOF") break;
+
+    // Found a BLOCK
+    if (code === "0" && value === "BLOCK") {
+      const { block, nextIndex } = parseOneBlock(lines, i);
+      if (block) {
+        blocks.set(block.name, block);
+      }
+      i = nextIndex;
+      continue;
+    }
+
+    i += 2;
+  }
+
+  return blocks;
+}
+
+/**
+ * Parse a single block definition from BLOCK to ENDBLK.
+ */
+function parseOneBlock(
+  lines: string[],
+  startIndex: number,
+): { block: BlockDefinition | null; nextIndex: number } {
+  // Read BLOCK header pairs
+  const { pairs: headerPairs, nextIndex: afterHeader } = readEntityPairs(
+    lines,
+    startIndex,
+  );
+
+  const name = getStringValue(headerPairs, 2);
+  if (!name) {
+    // Skip to ENDBLK
+    let i = afterHeader;
+    while (i < lines.length - 1) {
+      if (lines[i].trim() === "0" && lines[i + 1].trim() === "ENDBLK") {
+        return { block: null, nextIndex: skipPastEntity(lines, i) };
+      }
+      i += 2;
+    }
+    return { block: null, nextIndex: i };
+  }
+
+  const baseX = getFloatValue(headerPairs, 10) ?? 0;
+  const baseY = getFloatValue(headerPairs, 20) ?? 0;
+
+  // Collect entities within this block until ENDBLK
+  const blockEntities: BlockEntity[] = [];
+  let i = afterHeader;
+
+  while (i < lines.length - 1) {
+    const code = lines[i].trim();
+    const value = lines[i + 1].trim();
+
+    if (code === "0" && value === "ENDBLK") {
+      // Skip ENDBLK and its properties
+      i = skipPastEntity(lines, i);
+      break;
+    }
+
+    if (code === "0" && value === "EOF") break;
+
+    if (code === "0") {
+      const entityType = value;
+
+      // Handle VERTEX/SEQEND (part of old-style POLYLINE)
+      if (entityType === "VERTEX" || entityType === "SEQEND") {
+        i = skipPastEntity(lines, i);
+        continue;
+      }
+
+      // Handle old-style POLYLINE in blocks
+      if (entityType === "POLYLINE") {
+        const { pairs, nextIndex } = readEntityPairs(lines, i);
+        const closedFlag = getIntValue(pairs, 70) ?? 0;
+        const closed = (closedFlag & 1) === 1;
+        const vertices: Array<{ x: number; y: number }> = [];
+
+        let vi = nextIndex;
+        while (vi < lines.length - 1) {
+          const vc = lines[vi].trim();
+          const vv = lines[vi + 1].trim();
+
+          if (vc === "0" && vv === "SEQEND") {
+            vi = skipPastEntity(lines, vi);
+            break;
+          }
+
+          if (vc === "0" && vv === "VERTEX") {
+            const vResult = readEntityPairs(lines, vi);
+            const x = getFloatValue(vResult.pairs, 10) ?? 0;
+            const y = getFloatValue(vResult.pairs, 20) ?? 0;
+            vertices.push({ x, y });
+            vi = vResult.nextIndex;
+            continue;
+          }
+
+          if (vc === "0") break; // Hit something unexpected
+          vi += 2;
+        }
+
+        blockEntities.push({
+          type: "POLYLINE",
+          pairs,
+          polylineVertices: vertices,
+          polylineClosed: closed,
+        });
+        i = vi;
+        continue;
+      }
+
+      // Regular entity
+      const { pairs, nextIndex } = readEntityPairs(lines, i);
+      blockEntities.push({ type: entityType, pairs });
+      i = nextIndex;
+      continue;
+    }
+
+    i += 2;
+  }
+
+  return {
+    block: { name, baseX, baseY, entities: blockEntities },
+    nextIndex: i,
+  };
+}
+
+/**
+ * Skip past a code-0 entity and all its property pairs.
+ */
+function skipPastEntity(lines: string[], startIndex: number): number {
+  let i = startIndex + 2; // Skip the "0" + entity type
+  while (i < lines.length - 1) {
+    if (lines[i].trim() === "0") break;
+    i += 2;
+  }
+  return i;
+}
+
+// ---- INSERT resolution -------------------------------------------------
+
+/**
+ * Transform a point by INSERT parameters: scale, rotate, translate.
+ */
+function transformPoint(
+  x: number,
+  y: number,
+  insertX: number,
+  insertY: number,
+  scaleX: number,
+  scaleY: number,
+  rotationRad: number,
+  baseX: number,
+  baseY: number,
+): { x: number; y: number } {
+  // 1. Subtract block base point
+  let px = x - baseX;
+  let py = y - baseY;
+
+  // 2. Scale
+  px *= scaleX;
+  py *= scaleY;
+
+  // 3. Rotate
+  if (rotationRad !== 0) {
+    const cos = Math.cos(rotationRad);
+    const sin = Math.sin(rotationRad);
+    const rx = px * cos - py * sin;
+    const ry = px * sin + py * cos;
+    px = rx;
+    py = ry;
+  }
+
+  // 4. Translate to insertion point
+  return { x: px + insertX, y: py + insertY };
+}
+
+/**
+ * Transform an angle by rotation and Y-scale reflection.
+ */
+function transformAngle(
+  angleDeg: number,
+  scaleX: number,
+  scaleY: number,
+  rotationDeg: number,
+): number {
+  let a = angleDeg;
+  // If scale flips one axis, mirror the angle
+  if (scaleX * scaleY < 0) {
+    a = -a;
+  }
+  a += rotationDeg;
+  // Normalize to 0-360
+  a = ((a % 360) + 360) % 360;
+  return a;
+}
+
+interface InsertResolutionContext {
+  parentLayer?: string;
+  parentColor?: number;
+  parentLinetype?: string;
+  stack: string[];
+  depth: number;
+}
+
+function transformResolvedEntity(
+  entity: DxfEntityV2,
+  insertX: number,
+  insertY: number,
+  scaleX: number,
+  scaleY: number,
+  rotationDeg: number,
+  rotationRad: number,
+  baseX: number,
+  baseY: number,
+): DxfEntityV2 {
+  switch (entity.type) {
+    case "LINE": {
+      const { x1 = 0, y1 = 0, x2 = 0, y2 = 0 } = entity.coordinates;
+      const p1 = transformPoint(
+        x1,
+        y1,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      );
+      const p2 = transformPoint(
+        x2,
+        y2,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      );
+      return {
+        ...entity,
+        coordinates: { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y },
+        length: Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2),
+      };
+    }
+
+    case "CIRCLE": {
+      const { cx = 0, cy = 0, r = 0 } = entity.coordinates;
+      const center = transformPoint(
+        cx,
+        cy,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      );
+      const scaledR = r * Math.abs((scaleX + scaleY) / 2);
+      return {
+        ...entity,
+        coordinates: { cx: center.x, cy: center.y, r: scaledR },
+        length: 2 * Math.PI * scaledR,
+        closed: true,
+      };
+    }
+
+    case "ARC": {
+      const {
+        cx = 0,
+        cy = 0,
+        r = 0,
+        startAngle = 0,
+        endAngle = 360,
+      } = entity.coordinates;
+      const center = transformPoint(
+        cx,
+        cy,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      );
+      const scaledR = r * Math.abs((scaleX + scaleY) / 2);
+      const newStart = transformAngle(startAngle, scaleX, scaleY, rotationDeg);
+      const newEnd = transformAngle(endAngle, scaleX, scaleY, rotationDeg);
+      return {
+        ...entity,
+        coordinates: {
+          cx: center.x,
+          cy: center.y,
+          r: scaledR,
+          startAngle: newStart,
+          endAngle: newEnd,
+        },
+        length: calculateArcLength(scaledR, newStart, newEnd),
+      };
+    }
+
+    case "LWPOLYLINE":
+    case "SPLINE": {
+      const points = entity.coordinates.points ?? [];
+      const mirrored = (scaleX < 0) !== (scaleY < 0);
+      const transformedPoints = points.map((p) => {
+        const tp = transformPoint(
+          p.x,
+          p.y,
+          insertX,
+          insertY,
+          scaleX,
+          scaleY,
+          rotationRad,
+          baseX,
+          baseY,
+        );
+        const bulge = p.bulge !== undefined ? (mirrored ? -p.bulge : p.bulge) : undefined;
+        return { ...tp, ...(bulge !== undefined ? { bulge } : {}) };
+      });
+      return {
+        ...entity,
+        coordinates: { points: transformedPoints },
+        length: calculatePolylineLengthWithBulge(transformedPoints, entity.closed),
+      };
+    }
+
+    case "TEXT": {
+      const { x = 0, y = 0, text = "", height = 1 } = entity.coordinates;
+      const pos = transformPoint(
+        x,
+        y,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      );
+      return {
+        ...entity,
+        coordinates: {
+          x: pos.x,
+          y: pos.y,
+          text,
+          height: height * Math.abs(scaleY),
+        },
+        length: 0,
+      };
+    }
+
+    case "DIMENSION":
+      return entity;
+  }
+}
+
+/**
+ * Resolve an INSERT entity into flat DxfEntityV2[] by instantiating its block.
+ */
+function resolveInsert(
+  pairs: GroupPair[],
+  blocks: Map<string, BlockDefinition>,
+  idCounter: { value: number },
+  warnings: WarningCollector,
+  context: InsertResolutionContext = { stack: [], depth: 0 },
+): DxfEntityV2[] {
+  const blockName = getStringValue(pairs, 2);
+  if (!blockName) return [];
+
+  if (context.stack.includes(blockName)) {
+    const cyclePath = [...context.stack, blockName].join(" -> ");
+    warnings.push(`Zyklische INSERT-Referenz erkannt: ${cyclePath}.`);
+    return [];
+  }
+
+  if (context.depth >= MAX_INSERT_DEPTH) {
+    warnings.push(
+      `Maximale INSERT-Verschachtelungstiefe (${MAX_INSERT_DEPTH}) bei Block \"${blockName}\" erreicht.`,
+    );
+    return [];
+  }
+
+  const block = blocks.get(blockName);
+  if (!block) {
+    warnings.push(`Block "${blockName}" nicht gefunden (INSERT ignoriert).`);
+    return [];
+  }
+
+  // INSERT properties
+  const insertX = getFloatValue(pairs, 10) ?? 0;
+  const insertY = getFloatValue(pairs, 20) ?? 0;
+  const scaleX = getFloatValue(pairs, 41) ?? 1;
+  const scaleY = getFloatValue(pairs, 42) ?? 1;
+  const rotationDeg = getFloatValue(pairs, 50) ?? 0;
+  const rotationRad = (rotationDeg * Math.PI) / 180;
+
+  // INSERT can override layer/color
+  const insertLayer = getStringValue(pairs, 8);
+  const insertColor = getIntValue(pairs, 62);
+  const insertLinetype = getStringValue(pairs, 6);
+
+  const effectiveInsertLayer = resolveLayer(pairs, context.parentLayer);
+  const effectiveInsertColor = resolveColor(pairs, context.parentColor);
+  const effectiveInsertLinetype = resolveLinetype(
+    pairs,
+    context.parentLinetype,
+  );
+
+  const result: DxfEntityV2[] = [];
+  const nextContext: InsertResolutionContext = {
+    parentLayer: effectiveInsertLayer,
+    parentColor: effectiveInsertColor,
+    parentLinetype: effectiveInsertLinetype,
+    stack: [...context.stack, blockName],
+    depth: context.depth + 1,
+  };
+
+  for (const blockEntity of block.entities) {
+    const resolved = resolveBlockEntity(
+      blockEntity,
+      blocks,
+      insertX,
+      insertY,
+      scaleX,
+      scaleY,
+      rotationDeg,
+      rotationRad,
+      block.baseX,
+      block.baseY,
+      effectiveInsertLayer ?? insertLayer,
+      effectiveInsertColor ?? insertColor,
+      effectiveInsertLinetype ?? insertLinetype,
+      idCounter,
+      warnings,
+      nextContext,
+    );
+    if (resolved.length > 0) {
+      result.push(...resolved);
+    }
+  }
+
+  // Tag all resolved entities with the top-level source block name
+  const topLevelBlock = context.stack.length === 0 ? blockName : context.stack[0];
+  for (const entity of result) {
+    if (!entity.sourceBlock) {
+      entity.sourceBlock = topLevelBlock;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Resolve a single block entity with INSERT transformation.
+ */
+function resolveBlockEntity(
+  blockEntity: BlockEntity,
+  blocks: Map<string, BlockDefinition>,
+  insertX: number,
+  insertY: number,
+  scaleX: number,
+  scaleY: number,
+  rotationDeg: number,
+  rotationRad: number,
+  baseX: number,
+  baseY: number,
+  insertLayer: string | undefined,
+  insertColor: number | undefined,
+  insertLinetype: string | undefined,
+  idCounter: { value: number },
+  warnings: WarningCollector,
+  context: InsertResolutionContext,
+): DxfEntityV2[] {
+  const { type, pairs } = blockEntity;
+
+  // Handle old-style POLYLINE from block
+  if (type === "POLYLINE" && blockEntity.polylineVertices) {
+    const layer = resolveLayer(pairs, insertLayer);
+    const color = resolveColor(pairs, insertColor);
+    const linetype = resolveLinetype(pairs, insertLinetype);
+
+    const transformedPoints = blockEntity.polylineVertices.map((p) =>
+      transformPoint(
+        p.x,
+        p.y,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      ),
+    );
+
+    if (transformedPoints.length < 2) return [];
+
+    const closed = blockEntity.polylineClosed ?? false;
+    const id = idCounter.value++;
+    return [
+      {
+        id,
+        type: "LWPOLYLINE",
+        layer,
+        color,
+        linetype,
+        coordinates: { points: transformedPoints },
+        length: calculatePolylineLength(transformedPoints, closed),
+        closed,
+      },
+    ];
+  }
+
+  if (!SUPPORTED_TYPES.has(type) && type !== "INSERT") {
+    warnings.push(`Uebersprungener Entity-Typ: ${type}`);
+    return [];
+  }
+
+  if (type === "INSERT") {
+    return resolveInsert(pairs, blocks, idCounter, warnings, {
+      parentLayer: insertLayer,
+      parentColor: insertColor,
+      parentLinetype: insertLinetype,
+      stack: context.stack,
+      depth: context.depth,
+    }).map((entity) =>
+      transformResolvedEntity(
+        entity,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationDeg,
+        rotationRad,
+        baseX,
+        baseY,
+      ),
+    );
+  }
+
+  // Parse the block entity normally, then transform coordinates
+  const layer = resolveLayer(pairs, insertLayer);
+  const color = resolveColor(pairs, insertColor);
+  const linetype = resolveLinetype(pairs, insertLinetype);
+
+  const id = idCounter.value++;
+
+  switch (type) {
+    case "LINE": {
+      const x1 = getFloatValue(pairs, 10) ?? 0;
+      const y1 = getFloatValue(pairs, 20) ?? 0;
+      const x2 = getFloatValue(pairs, 11) ?? 0;
+      const y2 = getFloatValue(pairs, 21) ?? 0;
+      const p1 = transformPoint(
+        x1,
+        y1,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      );
+      const p2 = transformPoint(
+        x2,
+        y2,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      );
+      return [
+        {
+          id,
+          type: "LINE",
+          layer,
+          color,
+          linetype,
+          coordinates: { x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y },
+          length: Math.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2),
+        },
+      ];
+    }
+
+    case "CIRCLE": {
+      const cx = getFloatValue(pairs, 10) ?? 0;
+      const cy = getFloatValue(pairs, 20) ?? 0;
+      const r = getFloatValue(pairs, 40) ?? 0;
+      const center = transformPoint(
+        cx,
+        cy,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      );
+      // Scale radius (use average of scaleX/scaleY for non-uniform)
+      const scaledR = r * Math.abs((scaleX + scaleY) / 2);
+      return [
+        {
+          id,
+          type: "CIRCLE",
+          layer,
+          color,
+          linetype,
+          coordinates: { cx: center.x, cy: center.y, r: scaledR },
+          length: 2 * Math.PI * scaledR,
+          closed: true,
+        },
+      ];
+    }
+
+    case "ARC": {
+      const cx = getFloatValue(pairs, 10) ?? 0;
+      const cy = getFloatValue(pairs, 20) ?? 0;
+      const r = getFloatValue(pairs, 40) ?? 0;
+      const startAngle = getFloatValue(pairs, 50) ?? 0;
+      const endAngle = getFloatValue(pairs, 51) ?? 360;
+      const center = transformPoint(
+        cx,
+        cy,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      );
+      const scaledR = r * Math.abs((scaleX + scaleY) / 2);
+      const newStart = transformAngle(startAngle, scaleX, scaleY, rotationDeg);
+      const newEnd = transformAngle(endAngle, scaleX, scaleY, rotationDeg);
+      return [
+        {
+          id,
+          type: "ARC",
+          layer,
+          color,
+          linetype,
+          coordinates: {
+            cx: center.x,
+            cy: center.y,
+            r: scaledR,
+            startAngle: newStart,
+            endAngle: newEnd,
+          },
+          length: calculateArcLength(scaledR, newStart, newEnd),
+        },
+      ];
+    }
+
+    case "LWPOLYLINE": {
+      const points = extractPolylinePoints(pairs);
+      const closedFlag = getIntValue(pairs, 70) ?? 0;
+      const closed = (closedFlag & 1) === 1;
+      // Bulge negiert sich bei Achsenspiegelung
+      const mirrored = (scaleX < 0) !== (scaleY < 0);
+      const transformedPoints = points.map((p) => {
+        const tp = transformPoint(
+          p.x,
+          p.y,
+          insertX,
+          insertY,
+          scaleX,
+          scaleY,
+          rotationRad,
+          baseX,
+          baseY,
+        );
+        const bulge = p.bulge !== undefined ? (mirrored ? -p.bulge : p.bulge) : undefined;
+        return { ...tp, ...(bulge !== undefined ? { bulge } : {}) };
+      });
+      if (transformedPoints.length < 2) return [];
+      return [
+        {
+          id,
+          type: "LWPOLYLINE",
+          layer,
+          color,
+          linetype,
+          coordinates: { points: transformedPoints },
+          length: calculatePolylineLengthWithBulge(transformedPoints, closed),
+          closed,
+        },
+      ];
+    }
+
+    case "SPLINE": {
+      const points = extractSplinePoints(pairs);
+      const splineFlags = getIntValue(pairs, 70) ?? 0;
+      const closed = (splineFlags & 1) !== 0;
+      const transformedPoints = points.map((p) =>
+        transformPoint(
+          p.x,
+          p.y,
+          insertX,
+          insertY,
+          scaleX,
+          scaleY,
+          rotationRad,
+          baseX,
+          baseY,
+        ),
+      );
+      if (transformedPoints.length < 2) return [];
+      return [
+        {
+          id,
+          type: "SPLINE",
+          layer,
+          color,
+          linetype,
+          coordinates: { points: transformedPoints },
+          length: calculatePolylineLength(transformedPoints, closed),
+          closed,
+        },
+      ];
+    }
+
+    case "TEXT": {
+      const x = getFloatValue(pairs, 10) ?? 0;
+      const y = getFloatValue(pairs, 20) ?? 0;
+      const text = getStringValue(pairs, 1) ?? "";
+      const height = getFloatValue(pairs, 40) ?? 1;
+      const pos = transformPoint(
+        x,
+        y,
+        insertX,
+        insertY,
+        scaleX,
+        scaleY,
+        rotationRad,
+        baseX,
+        baseY,
+      );
+      const scaledHeight = height * Math.abs(scaleY);
+      return [
+        {
+          id,
+          type: "TEXT",
+          layer,
+          color,
+          linetype,
+          coordinates: { x: pos.x, y: pos.y, text, height: scaledHeight },
+          length: 0,
+        },
+      ];
+    }
+
+    case "DIMENSION": {
+      return [
+        {
+          id,
+          type: "DIMENSION",
+          layer,
+          color,
+          linetype,
+          coordinates: {},
+          length: 0,
+        },
+      ];
+    }
+
+    default:
+      return [];
+  }
+}
+
+/**
+ * Resolve layer: if entity layer is "0" (ByBlock), use INSERT layer.
+ */
+function resolveLayer(
+  pairs: GroupPair[],
+  insertLayer: string | undefined,
+): string {
+  const entityLayer = getStringValue(pairs, 8) ?? "0";
+  if (entityLayer === "0" && insertLayer) return insertLayer;
+  return entityLayer;
+}
+
+/**
+ * Resolve color: if entity color is 0 (ByBlock), use INSERT color.
+ */
+function resolveColor(
+  pairs: GroupPair[],
+  insertColor: number | undefined,
+): number {
+  const entityColor = getIntValue(pairs, 62);
+  if (entityColor === undefined || entityColor === 0) {
+    return insertColor ?? 7;
+  }
+  return entityColor;
+}
+
+/**
+ * Resolve linetype: if entity has no linetype or "BYBLOCK", use INSERT linetype.
+ */
+function resolveLinetype(
+  pairs: GroupPair[],
+  insertLinetype: string | undefined,
+): string {
+  const entityLinetype = getStringValue(pairs, 6);
+  if (!entityLinetype || entityLinetype === "BYBLOCK") {
+    return insertLinetype ?? "CONTINUOUS";
+  }
+  return entityLinetype;
+}
+
 // ---- Entity parsing ----------------------------------------------------
 
 const SUPPORTED_TYPES = new Set<string>([
@@ -191,6 +1069,7 @@ const SUPPORTED_TYPES = new Set<string>([
   "CIRCLE",
   "ARC",
   "LWPOLYLINE",
+  "SPLINE",
   "TEXT",
   "DIMENSION",
   "POLYLINE", // Treated as LWPOLYLINE
@@ -200,10 +1079,11 @@ const SUPPORTED_TYPES = new Set<string>([
 function parseEntitiesSection(
   lines: string[],
   startIndex: number,
+  blocks: Map<string, BlockDefinition>,
   warnings: WarningCollector,
 ): DxfEntityV2[] {
   const entities: DxfEntityV2[] = [];
-  let id = 0;
+  const idCounter = { value: 0 };
   let i = startIndex;
 
   while (i < lines.length - 1) {
@@ -222,7 +1102,7 @@ function parseEntitiesSection(
 
     // We expect code 0 for entity type
     if (codeLine !== "0") {
-      i++;
+      i += 2;
       continue;
     }
 
@@ -230,7 +1110,22 @@ function parseEntitiesSection(
 
     // Skip VERTEX/SEQEND (part of POLYLINE but handled differently)
     if (entityType === "VERTEX" || entityType === "SEQEND") {
-      i += 2;
+      i = skipPastEntity(lines, i);
+      continue;
+    }
+
+    // Handle INSERT entities: resolve block references
+    if (entityType === "INSERT") {
+      const { pairs, nextIndex } = readEntityPairs(lines, i);
+      i = nextIndex;
+
+      const resolved = resolveInsert(
+        pairs,
+        blocks,
+        idCounter,
+        warnings,
+      );
+      entities.push(...resolved);
       continue;
     }
 
@@ -253,19 +1148,25 @@ function parseEntitiesSection(
 
     // Handle POLYLINE entities (old-style, converted to LWPOLYLINE)
     if (entityType === "POLYLINE") {
-      const entity = parsePolylineEntity(pairs, lines, i, id, warnings);
+      const entity = parsePolylineEntity(
+        pairs,
+        lines,
+        i,
+        idCounter.value,
+        warnings,
+      );
       if (entity) {
         entities.push(entity.entity);
-        id++;
+        idCounter.value++;
         i = entity.nextIndex;
       }
       continue;
     }
 
-    const entity = parseEntity(entityType, pairs, id, warnings);
+    const entity = parseEntity(entityType, pairs, idCounter.value, warnings);
     if (entity) {
       entities.push(entity);
-      id++;
+      idCounter.value++;
     }
   }
 
@@ -278,35 +1179,32 @@ function parseEntitiesSection(
  * Behandelte Sequenzen:
  *   \P         -> Leerzeichen (Absatzumbruch)
  *   \~~        -> Leerzeichen (geschuetztes Leerzeichen)
- *   {\H2.5;..} -> Formatblock entfernen (Inhalt beibehalten)
- *   \A1;       -> Steuersequenz entfernen
- *   \H2.5;     -> Steuersequenz entfernen
- *   { }        -> Verbleibende Klammern entfernen
+ *   {\H2.5;..} -> Formatbloecke (Inhalt beibehalten)
+ *   \A1; etc.  -> Steuersequenzen entfernt
+ *   { }        -> verbleibende geschweifte Klammern entfernt
  */
 function normalizeMText(raw: string): string {
   let text = raw;
 
-  // 1. Formatbloecke aufloesen: {\\X...;content} -> content
-  //    Wiederholte Anwendung fuer verschachtelte Bloecke
-  let prev = "";
-  let iterations = 0;
-  while (text !== prev && iterations < 10) {
-    prev = text;
-    text = text.replace(/\{\\[^{}]*?;([^{}]*)\}/g, "$1");
-    iterations++;
+  // 1. Iterativ Formatbloecke aufloesen: {\fArial|...; Content} -> Content
+  //    Max 10 Iterationen fuer verschachtelte Bloecke
+  for (let iter = 0; iter < 10; iter++) {
+    const replaced = text.replace(/\{\\[^{}]*?;([^{}]*)\}/g, "$1");
+    if (replaced === text) break;
+    text = replaced;
   }
 
-  // 2. Freisteehende Steuersequenzen: \A1; \H2.5; \fArial; etc.
+  // 2. Standalone-Steuersequenzen: \A1; \H2.5; \fArial; etc.
   text = text.replace(/\\[A-Za-z][^;]*;/g, "");
 
-  // 3. Absatzumbrueche und geschuetzte Leerzeichen
+  // 3. Absatzumbruch und geschuetztes Leerzeichen
   text = text.replace(/\\P/gi, " ");
-  text = text.replace(/\\~~/g, " ");
+  text = text.replace(/\\~/g, " ");
 
   // 4. Verbleibende geschweifte Klammern
   text = text.replace(/[{}]/g, "");
 
-  // 5. Trim und Mehrfach-Leerzeichen
+  // 5. Whitespace normalisieren
   text = text.replace(/\s+/g, " ").trim();
 
   return text;
@@ -376,6 +1274,16 @@ function parseEntity(
       break;
     }
 
+    case "SPLINE": {
+      type = "SPLINE";
+      const points = extractSplinePoints(pairs);
+      const splineFlags = getIntValue(pairs, 70) ?? 0;
+      closed = (splineFlags & 1) !== 0;
+      coordinates = { points };
+      length = points.length >= 2 ? calculatePolylineLength(points, closed) : 0;
+      break;
+    }
+
     case "TEXT": {
       type = "TEXT";
       const x = getFloatValue(pairs, 10) ?? 0;
@@ -387,30 +1295,31 @@ function parseEntity(
       break;
     }
 
-    case "DIMENSION": {
-      type = "DIMENSION";
-      // Dimensions are parsed so the cleaner can remove them.
-      // We don't extract geometry -- just mark them.
-      coordinates = {};
-      length = 0;
-      break;
-    }
-
     case "MTEXT": {
-      type = "TEXT"; // MTEXT wird als TEXT gespeichert
+      // MTEXT wird als TEXT gespeichert (kein neuer Entity-Typ)
+      type = "TEXT";
       const x = getFloatValue(pairs, 10) ?? 0;
       const y = getFloatValue(pairs, 20) ?? 0;
       const height = getFloatValue(pairs, 40) ?? 1;
 
-      // MTEXT-Text: Code 3 (Fragmente, in Reihenfolge) + Code 1 (letztes Fragment)
-      const textParts3 = pairs
-        .filter((p) => p.code === 3)
-        .map((p) => p.value);
-      const textPart1 = getStringValue(pairs, 1) ?? "";
-      const rawText = [...textParts3, textPart1].join("");
-
+      // Code 3 = Textfragmente (mehrere möglich), Code 1 = letztes Fragment
+      const fragments: string[] = [];
+      for (const pair of pairs) {
+        if (pair.code === 3) fragments.push(pair.value);
+      }
+      const code1 = getStringValue(pairs, 1) ?? "";
+      fragments.push(code1);
+      const rawText = fragments.join("");
       const text = normalizeMText(rawText);
+
       coordinates = { x, y, text, height };
+      length = 0;
+      break;
+    }
+
+    case "DIMENSION": {
+      type = "DIMENSION";
+      coordinates = {};
       length = 0;
       break;
     }
@@ -479,7 +1388,6 @@ function parsePolylineEntity(
 
     // Skip unexpected content
     if (code === "0") {
-      // Hit something that's not VERTEX or SEQEND -- stop
       break;
     }
 
@@ -529,49 +1437,87 @@ function getFloatValue(pairs: GroupPair[], code: number): number | undefined {
   return isNaN(val) ? undefined : val;
 }
 
-/** Schwellwert: Bulge-Werte mit |bulge| < BULGE_THRESHOLD werden als gerade Linie behandelt. */
-export const BULGE_THRESHOLD = 0.0001;
+/**
+ * Extract ALL float values for a given group code (in order).
+ * Used for SPLINE knots, control points, fit points etc.
+ */
+function getAllFloatValues(pairs: GroupPair[], code: number): number[] {
+  const values: number[] = [];
+  for (const pair of pairs) {
+    if (pair.code === code) {
+      const val = parseFloat(pair.value);
+      if (!isNaN(val)) {
+        values.push(val);
+      }
+    }
+  }
+  return values;
+}
+
+/**
+ * Extract SPLINE points from group-code pairs.
+ * If fit points (codes 11/21) are present, prefer them over control points (10/20).
+ * Returns the point array and whether they came from fit points.
+ */
+function extractSplinePoints(
+  pairs: GroupPair[],
+): Array<{ x: number; y: number }> {
+  // Try fit points first (codes 11/21)
+  const fitX = getAllFloatValues(pairs, 11);
+  const fitY = getAllFloatValues(pairs, 21);
+  const fitCount = Math.min(fitX.length, fitY.length);
+
+  if (fitCount >= 2) {
+    const points: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < fitCount; i++) {
+      points.push({ x: fitX[i], y: fitY[i] });
+    }
+    return points;
+  }
+
+  // Fallback to control points (codes 10/20)
+  const ctrlX = getAllFloatValues(pairs, 10);
+  const ctrlY = getAllFloatValues(pairs, 20);
+  const ctrlCount = Math.min(ctrlX.length, ctrlY.length);
+
+  const points: Array<{ x: number; y: number }> = [];
+  for (let i = 0; i < ctrlCount; i++) {
+    points.push({ x: ctrlX[i], y: ctrlY[i] });
+  }
+  return points;
+}
 
 /**
  * Extract LWPOLYLINE points from group-code pairs.
  * Points are defined by multiple code-10/20 pairs in sequence.
- * Group Code 42 = Bulge value for arc segments.
  */
 function extractPolylinePoints(
   pairs: GroupPair[],
 ): Array<{ x: number; y: number; bulge?: number }> {
+  const points: Array<{ x: number; y: number; bulge?: number }> = [];
   const xValues: number[] = [];
   const yValues: number[] = [];
-  const bulgeValues = new Map<number, number>();
+  const bulgeValues = new Map<number, number>(); // pointIndex -> bulge
 
-  let currentPointIndex = -1;
-
+  let pointIndex = -1;
   for (const pair of pairs) {
     if (pair.code === 10) {
+      pointIndex++;
       xValues.push(parseFloat(pair.value) || 0);
-      currentPointIndex = xValues.length - 1;
     } else if (pair.code === 20) {
       yValues.push(parseFloat(pair.value) || 0);
     } else if (pair.code === 42) {
-      // Group Code 42 = Bulge, gehoert zum zuletzt gelesenen Punkt (nach Code 10)
       const b = parseFloat(pair.value);
-      if (!isNaN(b) && Math.abs(b) >= BULGE_THRESHOLD && currentPointIndex >= 0) {
-        bulgeValues.set(currentPointIndex, b);
+      if (!isNaN(b) && Math.abs(b) >= BULGE_THRESHOLD) {
+        bulgeValues.set(pointIndex, b);
       }
     }
   }
 
   const count = Math.min(xValues.length, yValues.length);
-  const points: Array<{ x: number; y: number; bulge?: number }> = [];
   for (let i = 0; i < count; i++) {
-    const point: { x: number; y: number; bulge?: number } = {
-      x: xValues[i],
-      y: yValues[i],
-    };
-    if (bulgeValues.has(i)) {
-      point.bulge = bulgeValues.get(i);
-    }
-    points.push(point);
+    const bulge = bulgeValues.get(i);
+    points.push({ x: xValues[i], y: yValues[i], ...(bulge !== undefined ? { bulge } : {}) });
   }
 
   return points;
@@ -601,7 +1547,6 @@ function calculatePolylineLength(
     const dy = points[i].y - points[i - 1].y;
     length += Math.sqrt(dx * dx + dy * dy);
   }
-  // Add closing segment if polyline is closed
   if (closed && points.length > 1) {
     const first = points[0];
     const last = points[points.length - 1];
@@ -613,12 +1558,8 @@ function calculatePolylineLength(
 }
 
 /**
- * Berechnet die Bogenlaenge eines Bulge-Segments.
- *
- * Mathematik:
- *   theta = 4 * atan(|bulge|)       -- Bogenwinkel
- *   r = chord / (2 * sin(theta/2))  -- Radius
- *   Bogenlaenge = r * theta
+ * Berechnet die Bogenlänge eines Segments mit Bulge-Wert.
+ * Formel: theta = 4 * atan(|bulge|), r = chord / (2 * sin(theta/2)), Länge = r * theta
  */
 function bulgeToArcLength(
   p1: { x: number; y: number },
@@ -629,19 +1570,14 @@ function bulgeToArcLength(
   const dy = p2.y - p1.y;
   const chord = Math.sqrt(dx * dx + dy * dy);
 
-  // Identische Punkte: keine Laenge
-  if (chord < 1e-10) return 0;
-
-  // Sicherheits-Check (sollte vom Caller bereits gefiltert sein)
-  if (Math.abs(bulge) < BULGE_THRESHOLD) return chord;
+  if (chord < 1e-10) return 0; // Identische Punkte
 
   const theta = 4 * Math.atan(Math.abs(bulge));
-
-  // Schutz vor Division durch Null bei theta nahe 2*PI
   const sinHalfTheta = Math.sin(theta / 2);
+
+  // Guard: sin(theta/2) nahe 0 (theta nahe 2*PI = Vollkreis)
   if (Math.abs(sinHalfTheta) < 1e-10) {
-    // Nahezu Vollkreis: Umfang = chord * PI (Durchmesser = chord)
-    return chord * Math.PI;
+    return chord * Math.PI; // Naeherung: Vollkreis-Umfang
   }
 
   const r = chord / (2 * sinHalfTheta);
@@ -649,21 +1585,16 @@ function bulgeToArcLength(
 }
 
 /**
- * Berechnet die Gesamtlaenge einer Polylinie mit Bulge-Unterstuetzung.
+ * Berechnet Polylinienlänge unter Berücksichtigung von Bulge-Werten.
  */
 function calculatePolylineLengthWithBulge(
   points: Array<{ x: number; y: number; bulge?: number }>,
   closed?: boolean,
 ): number {
-  if (points.length < 2) return 0;
-
   let length = 0;
-  const segmentCount = closed ? points.length : points.length - 1;
-
-  for (let i = 0; i < segmentCount; i++) {
+  for (let i = 0; i < points.length - 1; i++) {
     const p1 = points[i];
-    const p2 = points[(i + 1) % points.length];
-
+    const p2 = points[i + 1];
     if (p1.bulge !== undefined && Math.abs(p1.bulge) >= BULGE_THRESHOLD) {
       length += bulgeToArcLength(p1, p2, p1.bulge);
     } else {
@@ -672,7 +1603,17 @@ function calculatePolylineLengthWithBulge(
       length += Math.sqrt(dx * dx + dy * dy);
     }
   }
-
+  if (closed && points.length > 1) {
+    const last = points[points.length - 1];
+    const first = points[0];
+    if (last.bulge !== undefined && Math.abs(last.bulge) >= BULGE_THRESHOLD) {
+      length += bulgeToArcLength(last, first, last.bulge);
+    } else {
+      const dx = first.x - last.x;
+      const dy = first.y - last.y;
+      length += Math.sqrt(dx * dx + dy * dy);
+    }
+  }
   return length;
 }
 
