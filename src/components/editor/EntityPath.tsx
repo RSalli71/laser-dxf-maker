@@ -19,24 +19,9 @@ import type { DxfEntityV2 } from "@/types/dxf-v2";
 import { BULGE_THRESHOLD } from "@/lib/dxf/parser";
 import type { ClassificationType } from "@/types/classification";
 import { getLayerConfig } from "@/types/classification";
+import { ACI_COLORS, ACI_DEFAULT_COLOR } from "@/lib/dxf/aci-colors";
 
-/** ACI-Farben Mapping (Subset der 256 AutoCAD-Farben) */
-const ACI_COLORS: Record<number, string> = {
-  0: "#808080", // ByBlock -> Grau
-  1: "#ff0000", // Rot
-  2: "#ffff00", // Gelb
-  3: "#00cc00", // Gruen
-  4: "#00aacc", // Cyan
-  5: "#0000ff", // Blau
-  6: "#cc00cc", // Magenta
-  7: "#1a1a1a", // Weiss -> Dunkelgrau (auf hellem Hintergrund)
-  8: "#555555", // Dunkelgrau
-  9: "#888888", // Hellgrau
-  256: "#808080", // ByLayer -> Grau
-};
-
-/** Default-Farbe fuer nicht gemappte ACI-Nummern */
-const DEFAULT_COLOR = "#555555";
+const DEFAULT_COLOR = ACI_DEFAULT_COLOR;
 
 /** Classification to hex color mapping */
 const CLASSIFICATION_COLORS: Record<ClassificationType, string> = {
@@ -105,6 +90,9 @@ function EntityPathInner({
     stroke = CLASSIFICATION_COLORS[entity.classification];
     sw = 1.5;
     opacity = 1;
+    if (entity.classification === "BEND") {
+      dashArray = "6 3";
+    }
   } else if (isDimmed) {
     // Dimmed when other things are selected
     const rawColor = ACI_COLORS[entity.color] ?? DEFAULT_COLOR;
@@ -230,26 +218,34 @@ function ellipseToPath(
 
   const { cx, cy, rx, ry, rotation = 0 } = c;
 
+  const rotRad = (rotation * Math.PI) / 180;
+  const cosR = Math.cos(rotRad);
+  const sinR = Math.sin(rotRad);
+
   if (closed || (c.startAngle === undefined && c.endAngle === undefined)) {
     // Volle Ellipse als zwei Halbboegen
-    // SVG-Arc mit rotation fuer gedrehte Ellipsen
+    // Startpunkt bei Ellipsen-Winkel π (linker Scheitel), rotiert
+    const mx1 = cx - rx * cosR;
+    const my1 = cy - rx * sinR;
+    const mx2 = cx + rx * cosR;
+    const my2 = cy + rx * sinR;
     return [
-      `M${cx - rx},${cy}`,
-      `A${rx},${ry} ${rotation} 1,0 ${cx + rx},${cy}`,
-      `A${rx},${ry} ${rotation} 1,0 ${cx - rx},${cy}`,
+      `M${mx1},${my1}`,
+      `A${rx},${ry} ${rotation} 1,0 ${mx2},${my2}`,
+      `A${rx},${ry} ${rotation} 1,0 ${mx1},${my1}`,
       "Z",
     ].join(" ");
   }
 
-  // Elliptischer Bogen
+  // Elliptischer Bogen — Punkte auf der rotierten Ellipse
   const startRad = ((c.startAngle ?? 0) * Math.PI) / 180;
   let endRad = ((c.endAngle ?? 360) * Math.PI) / 180;
   if (endRad <= startRad) endRad += 2 * Math.PI;
 
-  const x1 = cx + rx * Math.cos(startRad);
-  const y1 = cy + ry * Math.sin(startRad);
-  const x2 = cx + rx * Math.cos(endRad);
-  const y2 = cy + ry * Math.sin(endRad);
+  const x1 = cx + rx * Math.cos(startRad) * cosR - ry * Math.sin(startRad) * sinR;
+  const y1 = cy + rx * Math.cos(startRad) * sinR + ry * Math.sin(startRad) * cosR;
+  const x2 = cx + rx * Math.cos(endRad) * cosR - ry * Math.sin(endRad) * sinR;
+  const y2 = cy + rx * Math.cos(endRad) * sinR + ry * Math.sin(endRad) * cosR;
 
   const largeArc = endRad - startRad > Math.PI ? 1 : 0;
   const sweep = 1; // CCW in DXF → sweep=1 wegen scale(1,-1)

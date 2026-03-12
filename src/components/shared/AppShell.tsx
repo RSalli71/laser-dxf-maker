@@ -15,6 +15,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { WorkflowStep } from "@/types/workflow";
 import type {
   DxfEntityV2,
+  LayerDefinition,
   ParseStats as ParseStatsType,
   CleanReport as CleanReportType,
 } from "@/types/dxf-v2";
@@ -22,6 +23,7 @@ import type { ProjectInfo, PartDefinition } from "@/types/project";
 import type { ClassificationType } from "@/types/classification";
 
 import { generateExportFilename } from "@/lib/dxf/exporter";
+import { aciToHex, aciName } from "@/lib/dxf/aci-colors";
 import {
   assignEntitiesToPart,
   classifyAssignedParts,
@@ -74,6 +76,9 @@ export function AppShell() {
   const [activeClassification, setActiveClassification] =
     useState<ClassificationType>("CUT");
   const [fileName, setFileName] = useState("");
+  const [layerTable, setLayerTable] = useState<Map<string, LayerDefinition>>(
+    new Map(),
+  );
 
   // ---- Derived State ----
   const currentStepIndex = STEP_ORDER.indexOf(workflowStep);
@@ -125,6 +130,26 @@ export function AppShell() {
     [activePart, parts],
   );
 
+  /** Color/layer summary for the active part's selected entities */
+  const activePartLayerSummary = useMemo(() => {
+    if (!activePartDefinition) return [];
+    const idSet = new Set(activePartDefinition.entityIds);
+    const groups = new Map<string, { count: number; color: number; layer: string }>();
+
+    for (const e of entities) {
+      if (!idSet.has(e.id)) continue;
+      const key = `${e.layer}:${e.color}`;
+      const entry = groups.get(key);
+      if (entry) {
+        entry.count++;
+      } else {
+        groups.set(key, { count: 1, color: e.color, layer: e.layer });
+      }
+    }
+
+    return Array.from(groups.values()).sort((a, b) => b.count - a.count);
+  }, [activePartDefinition, entities]);
+
   // ---- Navigation ----
   const goNext = useCallback(() => {
     const nextIndex = currentStepIndex + 1;
@@ -138,7 +163,7 @@ export function AppShell() {
           entities,
           populatedParts,
         );
-        const cleaned = cleanAssignedParts(assignedEntities, populatedParts);
+        const cleaned = cleanAssignedParts(assignedEntities, populatedParts, layerTable);
 
         setEntities(cleaned.entities);
         setParts(cleaned.parts);
@@ -179,6 +204,7 @@ export function AppShell() {
           const result = parseDxf(content);
           setEntities(result.entities);
           setParseStats(result.stats);
+          setLayerTable(result.layerTable);
         } catch {
           // Parser not yet implemented -- show error
           setParseStats({
@@ -363,6 +389,33 @@ export function AppShell() {
     }
   }, [parts, handleExportPart]);
 
+  // ---- New Project (reset) ----
+  const handleNewProject = useCallback(() => {
+    setWorkflowStep("project");
+    setProjectInfo(null);
+    setEntities([]);
+    setParseStats(null);
+    setParts([]);
+    setActivePart(null);
+    setCleanReports(new Map());
+    setActiveClassification("CUT");
+    setFileName("");
+    setLayerTable(new Map());
+  }, []);
+
+  // ---- Next File (keep project, reset file state) ----
+  const handleNextFile = useCallback(() => {
+    setWorkflowStep("upload");
+    setEntities([]);
+    setParseStats(null);
+    setParts([]);
+    setActivePart(null);
+    setCleanReports(new Map());
+    setActiveClassification("CUT");
+    setFileName("");
+    setLayerTable(new Map());
+  }, []);
+
   // ---- Part names map for CleanReport ----
   const partNames = useMemo(() => {
     const map = new Map<string, string>();
@@ -439,6 +492,36 @@ export function AppShell() {
                     ? `${activePartDefinition.name}: ${activePartDefinition.entityIds.length} Entities markiert`
                     : "Noch kein Teil aktiv"}
                 </p>
+                {activePartLayerSummary.length > 0 && (
+                  <div className="mt-3 space-y-1">
+                    <p className="text-xs font-medium text-gray-500">
+                      Farben / Layer:
+                    </p>
+                    {activePartLayerSummary.map(({ layer, count, color }) => {
+                      const hasMultipleLayers = activePartLayerSummary.some(
+                        (s) => s.layer !== activePartLayerSummary[0].layer,
+                      );
+                      const label = hasMultipleLayers
+                        ? `${layer} — ${aciName(color)}`
+                        : aciName(color);
+                      return (
+                        <div
+                          key={`${layer}:${color}`}
+                          className="flex items-center gap-2 text-xs text-gray-700"
+                        >
+                          <span
+                            className="inline-block h-2.5 w-2.5 shrink-0 rounded-sm border border-gray-300"
+                            style={{ backgroundColor: aciToHex(color) }}
+                          />
+                          <span className="truncate font-medium">{label}</span>
+                          <span className="ml-auto tabular-nums text-gray-400">
+                            {count}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
                 <p className="mt-2 text-xs leading-5 text-gray-600">
                   Fenster oder Klick fuegt Geometrie zum aktiven Teil hinzu. Ein
                   Klick auf bereits orange markierte Geometrie entfernt sie
@@ -586,7 +669,24 @@ export function AppShell() {
           </button>
         )}
 
-        {workflowStep === "export" && <div />}
+        {workflowStep === "export" && (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleNextFile}
+              className="rounded-md bg-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-200"
+            >
+              Naechste Datei
+            </button>
+            <button
+              type="button"
+              onClick={handleNewProject}
+              className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
+            >
+              Neues Projekt
+            </button>
+          </div>
+        )}
       </footer>
     </div>
   );

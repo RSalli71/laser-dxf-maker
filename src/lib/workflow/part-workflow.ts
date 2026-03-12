@@ -1,11 +1,7 @@
 import { classifyEntities } from "@/lib/dxf/classifier";
 import { cleanEntities } from "@/lib/dxf/cleaner";
-import type { CleanReport, DxfEntityV2 } from "@/types/dxf-v2";
+import type { CleanReport, DxfEntityV2, LayerDefinition } from "@/types/dxf-v2";
 import type { PartDefinition } from "@/types/project";
-
-function toEntityIdSet(parts: PartDefinition[]): Set<number> {
-  return new Set(parts.flatMap((part) => part.entityIds));
-}
 
 export function getPopulatedParts(parts: PartDefinition[]): PartDefinition[] {
   return parts.filter((part) => part.entityIds.length > 0);
@@ -52,13 +48,22 @@ export function getAssignedPartEntities(
   entities: DxfEntityV2[],
   parts: PartDefinition[],
 ): DxfEntityV2[] {
-  const assignedIds = toEntityIdSet(getPopulatedParts(parts));
+  const assignedIds = new Set(
+    getPopulatedParts(parts).flatMap((part) => part.entityIds),
+  );
   return entities.filter((entity) => assignedIds.has(entity.id));
 }
 
+/**
+ * Clean all assigned parts. Uses an entity index (Map) for O(1) lookups
+ * instead of filter+includes (A4).
+ *
+ * @param layerTable - Optional layer table for BYLAYER linetype resolution (A2)
+ */
 export function cleanAssignedParts(
   entities: DxfEntityV2[],
   parts: PartDefinition[],
+  layerTable?: Map<string, LayerDefinition>,
 ): {
   entities: DxfEntityV2[];
   parts: PartDefinition[];
@@ -66,15 +71,26 @@ export function cleanAssignedParts(
 } {
   const workingParts = getPopulatedParts(parts);
   const assignedEntities = getAssignedPartEntities(entities, workingParts);
+
+  // A4: Build entity index for O(1) lookups
+  const entityById = new Map<number, DxfEntityV2>();
+  for (const entity of assignedEntities) {
+    entityById.set(entity.id, entity);
+  }
+
   const cleanedById = new Map<number, DxfEntityV2>();
   const reports = new Map<string, CleanReport>();
   const nextParts: PartDefinition[] = [];
 
   for (const part of workingParts) {
-    const partEntities = assignedEntities.filter((entity) =>
-      part.entityIds.includes(entity.id),
-    );
-    const { cleaned, report } = cleanEntities(partEntities);
+    // O(n) per part via Map lookup instead of O(n*m) via filter+includes
+    const partEntities: DxfEntityV2[] = [];
+    for (const id of part.entityIds) {
+      const entity = entityById.get(id);
+      if (entity) partEntities.push(entity);
+    }
+
+    const { cleaned, report } = cleanEntities(partEntities, layerTable);
 
     reports.set(part.id, report);
     nextParts.push({
@@ -98,16 +114,28 @@ export function cleanAssignedParts(
   };
 }
 
+/**
+ * Classify entities for all assigned parts. Uses entity index (A4).
+ */
 export function classifyAssignedParts(
   entities: DxfEntityV2[],
   parts: PartDefinition[],
 ): DxfEntityV2[] {
+  // A4: Build entity index for O(1) lookups
+  const entityById = new Map<number, DxfEntityV2>();
+  for (const entity of entities) {
+    entityById.set(entity.id, entity);
+  }
+
   const classifiedById = new Map<number, DxfEntityV2>();
 
   for (const part of getPopulatedParts(parts)) {
-    const partEntities = entities.filter((entity) =>
-      part.entityIds.includes(entity.id),
-    );
+    const partEntities: DxfEntityV2[] = [];
+    for (const id of part.entityIds) {
+      const entity = entityById.get(id);
+      if (entity) partEntities.push(entity);
+    }
+
     const classified = classifyEntities(partEntities);
 
     for (const entity of classified) {

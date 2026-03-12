@@ -87,6 +87,14 @@ function computeBoundingBox(entities: DxfEntityV2[]): BoundingBoxV2 {
       maxX = Math.max(maxX, c.cx + c.r);
       maxY = Math.max(maxY, c.cy + c.r);
     }
+    // M4: Ellipse bounding box (conservative: uses max semi-axis)
+    if (c.cx !== undefined && c.cy !== undefined && c.rx !== undefined && c.ry !== undefined) {
+      const maxR = Math.max(c.rx, c.ry);
+      minX = Math.min(minX, c.cx - maxR);
+      minY = Math.min(minY, c.cy - maxR);
+      maxX = Math.max(maxX, c.cx + maxR);
+      maxY = Math.max(maxY, c.cy + maxR);
+    }
     if (c.points) {
       for (const p of c.points) {
         minX = Math.min(minX, p.x);
@@ -177,6 +185,7 @@ export function DxfEditor({
     ],
   );
 
+  const [isPanningState, setIsPanningState] = useState(false);
   const isPanning = useRef(false);
   const isDragging = useRef(false);
   const dragStart = useRef<{ clientX: number; clientY: number } | null>(null);
@@ -189,6 +198,7 @@ export function DxfEditor({
       // Middle click or shift+left click = pan
       if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
         isPanning.current = true;
+        setIsPanningState(true);
         lastPointer.current = { clientX: e.clientX, clientY: e.clientY };
         e.currentTarget.setPointerCapture(e.pointerId);
         return;
@@ -267,6 +277,7 @@ export function DxfEditor({
       // End pan
       if (isPanning.current) {
         isPanning.current = false;
+        setIsPanningState(false);
         lastPointer.current = null;
         // Sync viewBox state
         setViewBox({ ...viewBoxRef.current });
@@ -420,7 +431,7 @@ export function DxfEditor({
       <svg
         ref={svgRef}
         viewBox={viewBoxToString(viewBox)}
-        className="h-full w-full cursor-crosshair"
+        className={`h-full w-full ${isPanningState ? "cursor-grabbing" : "cursor-crosshair"}`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}

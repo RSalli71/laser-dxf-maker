@@ -2,10 +2,13 @@
  * CleanReport -- F4: Bereinigungs-Zusammenfassung.
  *
  * Zeigt pro Teil: entfernte Elemente, Duplikate, Bemassungen, etc.
+ * C1: Sortiert nach Part-Name fuer stabile Reihenfolge.
+ * C2: Debug-Mode zeigt auch Regeln mit 0 Treffern.
  */
 
 "use client";
 
+import { useState } from "react";
 import type { CleanReport as CleanReportType } from "@/types/dxf-v2";
 
 interface CleanReportProps {
@@ -14,6 +17,8 @@ interface CleanReportProps {
 }
 
 export function CleanReport({ reports, partNames }: CleanReportProps) {
+  const [debug, setDebug] = useState(false);
+
   if (reports.size === 0) {
     return (
       <div className="rounded-lg border border-gray-200 bg-gray-50 p-4">
@@ -24,13 +29,29 @@ export function CleanReport({ reports, partNames }: CleanReportProps) {
     );
   }
 
+  // C1: Sort entries by part name for stable ordering
+  const sortedEntries = Array.from(reports.entries()).sort(([idA], [idB]) => {
+    const nameA = partNames.get(idA) ?? idA;
+    const nameB = partNames.get(idB) ?? idB;
+    return nameA.localeCompare(nameB, "de");
+  });
+
   return (
     <div className="space-y-4">
-      <h3 className="text-sm font-semibold text-gray-900">
-        Bereinigungs-Zusammenfassung
-      </h3>
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-gray-900">
+          Bereinigungs-Zusammenfassung
+        </h3>
+        <button
+          type="button"
+          onClick={() => setDebug((d) => !d)}
+          className="text-xs text-gray-400 hover:text-gray-600"
+        >
+          {debug ? "Kompakt" : "Details"}
+        </button>
+      </div>
 
-      {Array.from(reports.entries()).map(([partId, report]) => {
+      {sortedEntries.map(([partId, report]) => {
         const partName = partNames.get(partId) ?? partId;
 
         return (
@@ -51,30 +72,49 @@ export function CleanReport({ reports, partNames }: CleanReportProps) {
               <ReportRow
                 label="Hilfsbloecke"
                 count={report.removedHelperBlocks}
+                showZero={debug}
               />
-              <ReportRow label="Bemassungen" count={report.removedDimensions} />
+              <ReportRow
+                label="Bemassungen"
+                count={report.removedDimensions}
+                showZero={debug}
+              />
               <ReportRow
                 label="Hilfslinien (Linetype)"
                 count={report.removedThreadHelpers}
+                showZero={debug}
               />
               <ReportRow
                 label="Gewinde-Boegen"
                 count={report.removedThreadArcs}
+                showZero={debug}
               />
-              <ReportRow
-                label="Gewinde-Splines"
-                count={report.removedThreadSplines}
-              />
+              {(report.suspectedThreadSplines > 0 || debug) && (
+                <ReportRow
+                  label="Verdacht Gewinde-Splines"
+                  count={report.suspectedThreadSplines}
+                  showZero={debug}
+                  warning
+                />
+              )}
               <ReportRow
                 label="Kreuz-Muster"
                 count={report.removedCrossPatterns}
+                showZero={debug}
               />
-              <ReportRow label="Duplikate" count={report.removedDuplicates} />
-              <ReportRow label="Nulllinien" count={report.removedZeroLines} />
+              <ReportRow
+                label="Duplikate"
+                count={report.removedDuplicates}
+                showZero={debug}
+              />
+              <ReportRow
+                label="Nulllinien"
+                count={report.removedZeroLines}
+                showZero={debug}
+              />
               {report.removedEmptyLayers.length > 0 && (
                 <div className="col-span-2 text-gray-500">
-                  Leere Layer:{" "}
-                  {report.removedEmptyLayers.join(", ")}
+                  Leere Layer: {report.removedEmptyLayers.join(", ")}
                 </div>
               )}
             </div>
@@ -85,12 +125,30 @@ export function CleanReport({ reports, partNames }: CleanReportProps) {
   );
 }
 
-function ReportRow({ label, count }: { label: string; count: number }) {
-  if (count === 0) return null;
+function ReportRow({
+  label,
+  count,
+  showZero = false,
+  warning = false,
+}: {
+  label: string;
+  count: number;
+  showZero?: boolean;
+  warning?: boolean;
+}) {
+  if (count === 0 && !showZero) return null;
   return (
     <div className="flex justify-between">
-      <span className="text-gray-600">{label}</span>
-      <span className="tabular-nums font-medium text-gray-900">{count}</span>
+      <span className={warning ? "text-amber-600" : "text-gray-600"}>
+        {label}
+      </span>
+      <span
+        className={`tabular-nums font-medium ${
+          warning && count > 0 ? "text-amber-600" : "text-gray-900"
+        }`}
+      >
+        {count}
+      </span>
     </div>
   );
 }

@@ -137,6 +137,18 @@ export interface ParseStats {
 }
 
 /**
+ * Layer definition from the DXF TABLES section.
+ */
+export interface LayerDefinition {
+  /** Layer name */
+  name: string;
+  /** ACI color number assigned to this layer */
+  color: number;
+  /** Linetype name (e.g. "Continuous", "DASHED") */
+  linetype: string;
+}
+
+/**
  * Complete result from the DXF parser.
  */
 export interface ParseResult {
@@ -145,6 +157,9 @@ export interface ParseResult {
 
   /** Parse statistics */
   stats: ParseStats;
+
+  /** Layer definitions from the TABLES section (layer name -> definition) */
+  layerTable: Map<string, LayerDefinition>;
 }
 
 // ---- Bounding Box -------------------------------------------------------
@@ -192,7 +207,8 @@ export interface CleanReport {
   removedDimensions: number;
   removedThreadHelpers: number;
   removedThreadArcs: number;
-  removedThreadSplines: number;
+  /** Suspected thread splines (flagged, not removed — needs user review) */
+  suspectedThreadSplines: number;
   removedCrossPatterns: number;
   removedDuplicates: number;
   removedZeroLines: number;

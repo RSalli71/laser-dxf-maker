@@ -615,9 +615,9 @@ describe("cleanEntities", () => {
 
     const { cleaned, report } = cleanEntities(entities);
 
-    expect(cleaned).toHaveLength(2);
-    expect(cleaned.map((e) => e.id).sort()).toEqual([0, 2]);
-    expect(report.removedThreadSplines).toBe(1);
+    // A1: Thread splines are flagged, not removed
+    expect(cleaned).toHaveLength(3);
+    expect(report.suspectedThreadSplines).toBe(1);
   });
 
   it("keeps open SPLINEs far from any CIRCLE (potential engrave)", () => {
@@ -641,7 +641,7 @@ describe("cleanEntities", () => {
     const { cleaned, report } = cleanEntities(entities);
 
     expect(cleaned).toHaveLength(2);
-    expect(report.removedThreadSplines).toBe(0);
+    expect(report.suspectedThreadSplines).toBe(0);
   });
 
   it("keeps closed SPLINEs even near bore holes", () => {
@@ -664,10 +664,10 @@ describe("cleanEntities", () => {
     const { cleaned, report } = cleanEntities(entities);
 
     expect(cleaned).toHaveLength(2);
-    expect(report.removedThreadSplines).toBe(0);
+    expect(report.suspectedThreadSplines).toBe(0);
   });
 
-  it("removes multiple thread SPLINEs around the same bore", () => {
+  it("flags multiple thread SPLINEs around the same bore (A1: no removal)", () => {
     const entities: DxfEntityV2[] = [
       makeEntity({
         id: 0,
@@ -703,9 +703,9 @@ describe("cleanEntities", () => {
 
     const { cleaned, report } = cleanEntities(entities);
 
-    expect(cleaned).toHaveLength(2);
-    expect(cleaned.map((e) => e.id).sort()).toEqual([0, 3]);
-    expect(report.removedThreadSplines).toBe(2);
+    // A1: Thread splines are flagged, not removed
+    expect(cleaned).toHaveLength(4);
+    expect(report.suspectedThreadSplines).toBe(2);
   });
 
   // ---- Combined priority test -------------------------------------------
