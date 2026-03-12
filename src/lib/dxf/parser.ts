@@ -20,6 +20,7 @@ import type {
   DxfEntityV2,
   DxfEntityType,
   EntityCoordinates,
+  LayerDefinition,
   ParseResult,
   ParseStats,
 } from "@/types/dxf-v2";
@@ -97,6 +98,9 @@ export function parseDxf(content: string): ParseResult {
   // Split into lines (handle \r\n and \n)
   const lines = trimmed.split(/\r?\n/);
 
+  // Parse TABLES section for layer definitions (color, linetype)
+  const layerTable = parseLayerTable(lines);
+
   // Parse BLOCKS section (block definitions for INSERT resolution)
   const blocks = parseBlocksSection(lines);
 
@@ -114,6 +118,7 @@ export function parseDxf(content: string): ParseResult {
     lines,
     entitiesStart,
     blocks,
+    layerTable,
     warnings,
   );
 
@@ -132,7 +137,7 @@ export function parseDxf(content: string): ParseResult {
   // Build statistics
   const stats = buildStats(entities, warnings.toArray());
 
-  return { entities, stats };
+  return { entities, stats, layerTable };
 }
 
 // ---- Binary detection --------------------------------------------------
@@ -160,6 +165,90 @@ function findSectionStart(lines: string[], sectionName: string): number {
     }
   }
   return -1;
+}
+
+// ---- TABLES section: LAYER table parsing --------------------------------
+
+/**
+ * Parse the TABLES section to extract LAYER definitions.
+ * Each LAYER entry has: name (group 2), color (group 62), linetype (group 6).
+ * Returns a Map from layer name to LayerDefinition.
+ */
+function parseLayerTable(lines: string[]): Map<string, LayerDefinition> {
+  const layers = new Map<string, LayerDefinition>();
+
+  const tablesStart = findSectionStart(lines, "TABLES");
+  if (tablesStart === -1) return layers;
+
+  // Find the LAYER table within TABLES
+  let i = tablesStart;
+  let foundLayerTable = false;
+
+  while (i < lines.length - 1) {
+    const code = lines[i].trim();
+    const value = lines[i + 1].trim();
+
+    // End of TABLES section
+    if (code === "0" && value === "ENDSEC") break;
+
+    // TABLE header -> check if it's the LAYER table
+    if (code === "0" && value === "TABLE") {
+      i += 2;
+      // Next pair should be group 2 with table name
+      if (i < lines.length - 1) {
+        const nameCode = lines[i].trim();
+        const nameValue = lines[i + 1].trim();
+        if (nameCode === "2" && nameValue === "LAYER") {
+          foundLayerTable = true;
+          i += 2;
+          continue;
+        }
+      }
+      continue;
+    }
+
+    // End of current table
+    if (code === "0" && value === "ENDTAB") {
+      if (foundLayerTable) break; // Done with LAYER table
+      i += 2;
+      continue;
+    }
+
+    // LAYER entry within the LAYER table
+    if (foundLayerTable && code === "0" && value === "LAYER") {
+      i += 2;
+      // Read all pairs for this LAYER entry
+      let layerName: string | undefined;
+      let layerColor = 7;
+      let layerLinetype = "Continuous";
+
+      while (i < lines.length - 1) {
+        const pairCode = parseInt(lines[i].trim(), 10);
+        const pairValue = lines[i + 1].trim();
+
+        if (pairCode === 0) break; // Next entry
+
+        if (pairCode === 2) layerName = pairValue;
+        if (pairCode === 62) layerColor = Math.abs(parseInt(pairValue, 10));
+        if (pairCode === 6) layerLinetype = pairValue;
+
+        i += 2;
+      }
+
+      if (layerName !== undefined) {
+        layers.set(layerName, {
+          name: layerName,
+          color: layerColor,
+          linetype: layerLinetype,
+        });
+      }
+      continue;
+    }
+
+    i += 2;
+  }
+
+  return layers;
 }
 
 // ---- Group code pair reading -------------------------------------------
@@ -645,6 +734,7 @@ function resolveInsert(
   blocks: Map<string, BlockDefinition>,
   idCounter: { value: number },
   warnings: WarningCollector,
+  layerTable: Map<string, LayerDefinition>,
   context: InsertResolutionContext = { stack: [], depth: 0 },
 ): DxfEntityV2[] {
   const blockName = getStringValue(pairs, 2);
@@ -683,7 +773,7 @@ function resolveInsert(
   const insertLinetype = getStringValue(pairs, 6);
 
   const effectiveInsertLayer = resolveLayer(pairs, context.parentLayer);
-  const effectiveInsertColor = resolveColor(pairs, context.parentColor);
+  const effectiveInsertColor = resolveColor(pairs, context.parentColor, layerTable, effectiveInsertLayer);
   const effectiveInsertLinetype = resolveLinetype(
     pairs,
     context.parentLinetype,
@@ -715,6 +805,7 @@ function resolveInsert(
       effectiveInsertLinetype ?? insertLinetype,
       idCounter,
       warnings,
+      layerTable,
       nextContext,
     );
     if (resolved.length > 0) {
@@ -752,6 +843,7 @@ function resolveBlockEntity(
   insertLinetype: string | undefined,
   idCounter: { value: number },
   warnings: WarningCollector,
+  layerTable: Map<string, LayerDefinition>,
   context: InsertResolutionContext,
 ): DxfEntityV2[] {
   const { type, pairs } = blockEntity;
@@ -759,7 +851,7 @@ function resolveBlockEntity(
   // Handle old-style POLYLINE from block
   if (type === "POLYLINE" && blockEntity.polylineVertices) {
     const layer = resolveLayer(pairs, insertLayer);
-    const color = resolveColor(pairs, insertColor);
+    const color = resolveColor(pairs, insertColor, layerTable, layer);
     const linetype = resolveLinetype(pairs, insertLinetype);
 
     const transformedPoints = blockEntity.polylineVertices.map((p) =>
@@ -800,7 +892,7 @@ function resolveBlockEntity(
   }
 
   if (type === "INSERT") {
-    return resolveInsert(pairs, blocks, idCounter, warnings, {
+    return resolveInsert(pairs, blocks, idCounter, warnings, layerTable, {
       parentLayer: insertLayer,
       parentColor: insertColor,
       parentLinetype: insertLinetype,
@@ -823,7 +915,7 @@ function resolveBlockEntity(
 
   // Parse the block entity normally, then transform coordinates
   const layer = resolveLayer(pairs, insertLayer);
-  const color = resolveColor(pairs, insertColor);
+  const color = resolveColor(pairs, insertColor, layerTable, layer);
   const linetype = resolveLinetype(pairs, insertLinetype);
 
   const id = idCounter.value++;
@@ -1094,16 +1186,40 @@ function resolveLayer(
 }
 
 /**
- * Resolve color: if entity color is 0 (ByBlock), use INSERT color.
+ * Resolve color with full DXF inheritance:
+ *   1. Explicit entity color (group 62) if set and not special
+ *   2. Color 0 (ByBlock): inherit from INSERT parent
+ *   3. Color 256 (ByLayer) or missing: look up layer color in TABLES
+ *   4. Fallback: 7 (white)
  */
 function resolveColor(
   pairs: GroupPair[],
   insertColor: number | undefined,
+  layerTable?: Map<string, LayerDefinition>,
+  resolvedLayer?: string,
 ): number {
   const entityColor = getIntValue(pairs, 62);
-  if (entityColor === undefined || entityColor === 0) {
+
+  // ByBlock: inherit from INSERT parent
+  if (entityColor === 0) {
     return insertColor ?? 7;
   }
+
+  // ByLayer (explicit 256) or missing: look up layer color
+  if (entityColor === undefined || entityColor === 256) {
+    if (insertColor !== undefined && insertColor !== 0 && insertColor !== 256) {
+      // INSERT has an explicit color override
+      return insertColor;
+    }
+    // Look up color from layer table
+    const layer = resolvedLayer ?? getStringValue(pairs, 8) ?? "0";
+    if (layerTable) {
+      const layerDef = layerTable.get(layer);
+      if (layerDef) return layerDef.color;
+    }
+    return 7;
+  }
+
   return entityColor;
 }
 
@@ -1140,6 +1256,7 @@ function parseEntitiesSection(
   lines: string[],
   startIndex: number,
   blocks: Map<string, BlockDefinition>,
+  layerTable: Map<string, LayerDefinition>,
   warnings: WarningCollector,
 ): DxfEntityV2[] {
   const entities: DxfEntityV2[] = [];
@@ -1184,6 +1301,7 @@ function parseEntitiesSection(
         blocks,
         idCounter,
         warnings,
+        layerTable,
       );
       entities.push(...resolved);
       continue;
@@ -1214,6 +1332,7 @@ function parseEntitiesSection(
         i,
         idCounter.value,
         warnings,
+        layerTable,
       );
       if (entity) {
         entities.push(entity.entity);
@@ -1223,7 +1342,7 @@ function parseEntitiesSection(
       continue;
     }
 
-    const entity = parseEntity(entityType, pairs, idCounter.value, warnings);
+    const entity = parseEntity(entityType, pairs, idCounter.value, warnings, layerTable);
     if (entity) {
       entities.push(entity);
       idCounter.value++;
@@ -1278,10 +1397,11 @@ function parseEntity(
   pairs: GroupPair[],
   id: number,
   warnings: WarningCollector,
+  layerTable?: Map<string, LayerDefinition>,
 ): DxfEntityV2 | null {
   // Extract common properties
   const layer = getStringValue(pairs, 8) ?? "0";
-  const color = getIntValue(pairs, 62) ?? 7;
+  const color = resolveColor(pairs, undefined, layerTable, layer);
   const linetype = getStringValue(pairs, 6) ?? "CONTINUOUS";
 
   let type: DxfEntityType;
@@ -1439,9 +1559,10 @@ function parsePolylineEntity(
   startIndex: number,
   id: number,
   warnings: WarningCollector,
+  layerTable?: Map<string, LayerDefinition>,
 ): { entity: DxfEntityV2; nextIndex: number } | null {
   const layer = getStringValue(headerPairs, 8) ?? "0";
-  const color = getIntValue(headerPairs, 62) ?? 7;
+  const color = resolveColor(headerPairs, undefined, layerTable, layer);
   const linetype = getStringValue(headerPairs, 6) ?? "CONTINUOUS";
   const closedFlag = getIntValue(headerPairs, 70) ?? 0;
   const closed = (closedFlag & 1) === 1;

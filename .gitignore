@@ -67,3 +67,13 @@ tmp/
 
 # JetBrains
 .idea/
+
+# TypeScript build cache
+tsconfig.tsbuildinfo
+
+# DXF test/sample data (binary, large)
+docs/knowledge/dxf-Data/*.DXF
+docs/knowledge/dxf-Data/*.dxf
+
+# Review/concept documents (local only)
+docs/concepts/
